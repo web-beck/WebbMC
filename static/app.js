@@ -4449,21 +4449,47 @@ function renderPlayit(card) {
     const port = Number(/:(\d+)\s*$/.exec(dest || '')?.[1]);
     return state.overview.servers.find((s) => s.port === port);
   };
+  /** What the panel found about a playit installed on this computer (when it is not using it). */
+  function externalNote(ext) {
+    if (!ext || ext.inUse || ext.state === 'none') return '';
+    const check = `<button class="btn btn-sm btn-ghost" data-playit="check">${icon('restart')}Check again</button>`;
+    if (ext.state === 'running') return '';
+    if (ext.state === 'installed') {
+      const start = ext.platform === 'linux' ? `Start it with <span class="addr">${esc(ext.start)}<button type="button" data-copy="${esc(ext.start)}" title="Copy">${icon('copy')}</button></span>` : `${esc(ext.start)}.`;
+      return notice(`<strong>playit is installed on this computer but not running.</strong> ${start} WebbMC then uses it by itself. ${check}`);
+    }
+    if (ext.state === 'denied') {
+      const fix =
+        ext.platform === 'linux'
+          ? `Let WebbMC's user in, then restart WebbMC: <span class="addr">sudo usermod -aG playit ${esc(ext.user)}<button type="button" data-copy="sudo usermod -aG playit ${esc(ext.user)}" title="Copy">${icon('copy')}</button></span>`
+          : 'Run WebbMC as the same user as playit (or as an administrator).';
+      return notice(`<strong>playit is running on this computer, but WebbMC is not allowed to talk to it.</strong> ${fix} ${check}`, 'warn');
+    }
+    return notice(`<strong>Found playit on this computer, but cannot use it.</strong> ${esc(ext.message || '')} ${check}`, 'warn');
+  }
   function view(st) {
+    const ext = st.external;
+    const existing = st.source === 'external'; // using the playit installed on this computer, not the panel's own
     const head = (extra = '') =>
-      `<div class="row"><h2>Public address with playit.gg</h2>${extra}<span class="spacer"></span>${st.version ? `<span class="faint small">agent ${esc(st.version)}</span>` : ''}</div>
-       <p class="sub" style="margin-top:4px">A free tunnel that gives your servers an address anyone can join, without opening ports on your router. Java and Bedrock both work.</p>`;
-    if (!st.supported) return `${head()}${notice(esc(st.reason))}`;
+      `<div class="row"><h2>Public address with playit.gg</h2>${extra}<span class="spacer"></span>${!existing && st.version ? `<span class="faint small">agent ${esc(st.version)}</span>` : ''}</div>
+       <p class="sub" style="margin-top:4px">A free tunnel that gives your servers an address anyone can join, without opening ports on your router. Java and Bedrock both work.</p>
+       ${existing ? notice('<strong>Using the playit already installed on this computer.</strong> WebbMC found it running, shows its tunnels and puts their addresses on your servers. It keeps running on its own; manage it with playit or on playit.gg.') : ''}
+       ${!existing && st.enabled && ext?.state === 'running' ? notice(`<strong>playit is also installed and running on this computer.</strong> Both work, but one is enough. <button class="btn btn-sm" data-playit="use-existing">Use that one instead</button>`) : ''}`;
     if (st.busy) return `${head()}<p class="row muted"><span class="spin"></span>${esc(st.busy)}...</p>`;
-    if (!st.enabled) {
-      return `${head()}
-        <p class="sub">Turning it on downloads the official playit agent (about 5 MB) from playit's GitHub releases into the panel's data folder and runs it while the panel runs. It does not touch a playit you installed yourself.</p>
-        <div class="row"><button class="btn btn-accent" data-playit="enable">${icon('signal')}Turn on playit.gg</button></div>`;
+    if (!existing && !st.enabled) {
+      const found = externalNote(ext);
+      if (!st.supported) return `${head()}${found}${notice(`${esc(st.reason)}${ext && ext.state === 'none' ? ' If you install playit on this computer, WebbMC finds it and shows its tunnels.' : ''}`)}`;
+      return `${head()}${found}
+        <p class="sub">${
+          ext && ext.state === 'none' ? 'No playit was found on this computer. ' : ''
+        }Turning it on downloads the official playit agent (about 5 MB) from playit's GitHub releases into the panel's data folder and runs it while the panel runs. It does not touch a playit you installed yourself.</p>
+        <div class="row"><button class="btn btn-accent" data-playit="enable">${icon('signal')}Turn on playit.gg</button>${ext ? `<button class="btn btn-sm btn-ghost" data-playit="check">${icon('search')}Look for playit on this computer</button>` : ''}</div>`;
     }
     const pill = (cls, label) => `<span class="pill ${cls}"><span class="dot ${cls}"></span>${esc(label)}</span>`;
-    const off = `<button class="btn btn-sm btn-ghost" data-playit="disable">Turn off</button>`;
-    const err = st.error ? notice(esc(st.error), 'warn') : '';
-    if (!st.connected || st.state === 'starting') return `${head(pill('warn', 'Starting'))}${err}<p class="row muted"><span class="spin"></span>Starting the playit agent...</p><div class="row">${off}</div>`;
+    const off = existing ? '' : `<button class="btn btn-sm btn-ghost" data-playit="disable">Turn off</button>`;
+    const err = st.error && !existing ? notice(esc(st.error), 'warn') : '';
+    if (!st.connected || st.state === 'starting')
+      return `${head(pill('warn', existing ? 'Connecting' : 'Starting'))}${err}<p class="row muted"><span class="spin"></span>${existing ? 'Connecting to playit...' : 'Starting the playit agent...'}</p><div class="row">${off}</div>`;
     if (st.state === 'waiting_for_secret' || st.claim) {
       const c = st.claim;
       return `${head(pill('warn', 'Not linked'))}${err}
@@ -4473,13 +4499,13 @@ function renderPlayit(card) {
                 <div class="row"><a class="btn btn-accent" href="${esc(c.url)}" target="_blank" rel="noopener">${icon('external')}Open playit.gg to link</a><span class="addr">${esc(c.url)}<button type="button" data-copy="${esc(c.url)}" title="Copy">${icon('copy')}</button></span></div>
                 <p class="row muted small"><span class="spin"></span>This page updates by itself once you approve.</p>
                 <div class="row"><button class="btn btn-sm btn-ghost" data-playit="cancel-link">Cancel</button>${off}</div></div>`
-            : `${c?.error ? notice(esc(c.error), 'warn') : ''}<p class="sub">Link the agent to a playit.gg account. Your tunnels and their addresses live in that account.</p>
+            : `${c?.error ? notice(esc(c.error), 'warn') : ''}<p class="sub">Link ${existing ? 'the playit on this computer' : 'the agent'} to a playit.gg account. Your tunnels and their addresses live in that account.</p>
                <div class="row"><button class="btn btn-accent" data-playit="link">${icon('link')}Link a playit.gg account</button>${off}</div>`
         }`;
     }
     if (st.state !== 'running') {
       return `${head(pill('bad', 'Problem'))}${err}${notice(esc(st.problem || `The agent reports: ${st.state.replace(/_/g, ' ')}`), 'warn')}
-        <div class="row"><button class="btn btn-accent btn-sm" data-playit="unlink">Link again</button><button class="btn btn-sm" data-playit="update">Update agent</button>${off}</div>`;
+        ${existing ? '' : `<div class="row"><button class="btn btn-accent btn-sm" data-playit="unlink">Link again</button><button class="btn btn-sm" data-playit="update">Update agent</button>${off}</div>`}`;
     }
     const dash = st.loginLink || PLAYIT_HOME;
     const tunnels = st.tunnels.length
@@ -4500,7 +4526,7 @@ function renderPlayit(card) {
       ${st.pendingTunnels.length ? notice(st.pendingTunnels.map(esc).join('<br>')) : ''}
       ${tunnels}
       <div class="row" style="margin-top:12px"><a class="btn btn-sm btn-accent" href="${esc(dash)}" target="_blank" rel="noopener">${icon('external')}Manage tunnels on playit.gg</a>
-        <button class="btn btn-sm" data-playit="update">Update agent</button><button class="btn btn-sm btn-ghost" data-playit="unlink">Unlink account</button>${off}</div>
+        ${existing ? '' : `<button class="btn btn-sm" data-playit="update">Update agent</button><button class="btn btn-sm btn-ghost" data-playit="unlink">Unlink account</button>${off}`}</div>
       ${st.accountStatus === 'guest' ? '<p class="hint">This is a guest playit.gg account. Open the dashboard and add an email so you do not lose it.</p>' : ''}
       ${st.log.length ? `<details class="raw"><summary class="faint small">Agent log</summary><pre class="mono small">${esc(st.log.join('\n'))}</pre></details>` : ''}`;
   }
@@ -4524,6 +4550,7 @@ function renderPlayit(card) {
     const action = b.dataset.playit;
     if (action === 'unlink' && !(await confirmBox('Unlink playit.gg?', 'The agent forgets its key and your servers lose their playit address until you link again. The tunnels stay in your playit.gg account.', { confirmText: 'Unlink' }))) return;
     if (action === 'disable' && !(await confirmBox('Turn off playit.gg?', 'Players cannot reach your servers through playit.gg until you turn it back on. Your account and tunnels are kept.', { confirmText: 'Turn off' }))) return;
+    if (action === 'use-existing' && !(await confirmBox('Use the playit on this computer?', "WebbMC turns its own playit agent off and shows the tunnels of the playit installed on this computer instead. Servers whose tunnels are only in WebbMC's agent lose their playit address until you add them to the other one.", { confirmText: 'Use it' }))) return;
     acting = true;
     b.disabled = true;
     if (action === 'enable' || action === 'update') card.querySelector('.row:last-child')?.insertAdjacentHTML('beforeend', '<span class="row muted small"><span class="spin"></span>Downloading...</span>');
