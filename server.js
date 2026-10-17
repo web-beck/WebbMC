@@ -1,5 +1,5 @@
 'use strict';
-// WebMC: a self-hosted Minecraft server panel. Run with `node server.js`.
+// WebbMC: a self-hosted Minecraft server panel. Run with `node server.js`.
 const http = require('http');
 const net = require('net');
 const fs = require('fs');
@@ -14,7 +14,7 @@ if (require('./lib/supervisor').run(__dirname)) return;
 try {
   process.loadEnvFile(path.join(__dirname, '.env'));
 } catch (err) {
-  if (err.code !== 'ENOENT') console.warn(`[webmc] Could not read .env: ${err.message}`);
+  if (err.code !== 'ENOENT') console.warn(`[webbmc] Could not read .env: ${err.message}`);
 }
 
 const store = require('./lib/store');
@@ -48,7 +48,7 @@ const HOST = (() => {
   if (!raw) return DEFAULT_HOST;
   if (raw.includes('://') || raw.includes('/')) {
     console.warn(
-      `[webmc] WEBMC_HOST is set to "${raw}", which is a URL. WEBMC_HOST is the network address to listen on ` +
+      `[webbmc] WEBMC_HOST is set to "${raw}", which is a URL. WEBMC_HOST is the network address to listen on ` +
         `(for example 0.0.0.0), not the public address. Ignoring it and listening on ${DEFAULT_HOST}. ` +
         'Remove the variable (or set it to 0.0.0.0).',
     );
@@ -63,7 +63,7 @@ const publicUrlHost = (() => {
   try {
     return process.env.WEBMC_PUBLIC_URL ? new URL(process.env.WEBMC_PUBLIC_URL).hostname : '';
   } catch {
-    console.warn(`[webmc] WEBMC_PUBLIC_URL "${process.env.WEBMC_PUBLIC_URL}" is not a full URL like https://panel.example.com`);
+    console.warn(`[webbmc] WEBMC_PUBLIC_URL "${process.env.WEBMC_PUBLIC_URL}" is not a full URL like https://panel.example.com`);
     return '';
   }
 })();
@@ -368,6 +368,7 @@ route('GET', '/api/ports', () => ports.list(manager.all(), PORT), { admin: true 
 route('GET', '/api/update', () => updates.status(), { admin: true });
 route('POST', '/api/update/check', () => updates.check(), { admin: true });
 route('POST', '/api/update', ({ user }) => updates.apply(user), { admin: true });
+route('POST', '/api/update/branch', ({ user, body }) => updates.switchBranch(user, body.branch), { admin: true });
 
 route('GET', '/api/activity', ({ user }) => {
   if (user.admin) return store.state.activity;
@@ -399,7 +400,7 @@ route('PUT', '/api/settings', ({ body }) => {
   const s = store.state.settings;
   if (body.signups !== undefined) s.signups = body.signups === 'open' ? 'open' : 'approval';
   if (body.passwordSignups !== undefined) s.passwordSignups = Boolean(body.passwordSignups);
-  if (body.panelName !== undefined) s.panelName = String(body.panelName).trim().slice(0, 40) || 'WebMC';
+  if (body.panelName !== undefined) s.panelName = String(body.panelName).trim().slice(0, 40) || 'WebbMC';
   if (body.javaPath !== undefined) s.javaPath = String(body.javaPath).trim() || 'java';
   if (body.autoJava !== undefined) s.autoJava = Boolean(body.autoJava);
   if (body.defaultMaxRam !== undefined) s.defaultMaxRam = int(body.defaultMaxRam, s.defaultMaxRam, 256, 1 << 20);
@@ -525,7 +526,7 @@ const server = http.createServer(async (req, res) => {
     throw httpError(404, 'Not found');
   } catch (err) {
     const status = err.status || (err.code === 'ENOENT' ? 404 : err.code === 'EEXIST' ? 409 : 500);
-    if (status >= 500) console.error('[webmc]', err);
+    if (status >= 500) console.error('[webbmc]', err);
     const message =
       err.code === 'ENOENT' ? 'File or folder not found' : err.code === 'EBUSY' || err.code === 'EPERM' ? 'File is in use or locked' : err.message;
     if (!res.headersSent) sendJson(res, status, { error: message });
@@ -541,17 +542,17 @@ playit.init();
 updates.init({ shutdown });
 
 server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') console.error(`[webmc] Port ${PORT} is already in use. Set WEBMC_PORT to use another one.`);
+  if (err.code === 'EADDRINUSE') console.error(`[webbmc] Port ${PORT} is already in use. Set WEBMC_PORT to use another one.`);
   else if (err.code === 'ENOTFOUND' || err.code === 'EADDRNOTAVAIL') {
-    console.error(`[webmc] Cannot listen on "${HOST}". WEBMC_HOST must be an address on this machine, such as 0.0.0.0 or 127.0.0.1.`);
-  } else console.error('[webmc]', err);
+    console.error(`[webbmc] Cannot listen on "${HOST}". WEBMC_HOST must be an address on this machine, such as 0.0.0.0 or 127.0.0.1.`);
+  } else console.error('[webbmc]', err);
   process.exit(1);
 });
 
 server.listen(PORT, HOST, () => {
   // localhost rather than 127.0.0.1: Google sign-in only accepts http:// redirect addresses for localhost.
   const shown = ['0.0.0.0', '::', '127.0.0.1', '::1'].includes(HOST) ? 'localhost' : HOST;
-  console.log(`\n  WebMC ${VERSION} is running at http://${shown}:${PORT}`);
+  console.log(`\n  WebbMC ${VERSION} is running at http://${shown}:${PORT}`);
   console.log(`  Data folder: ${store.DATA_DIR}`);
   if (process.env.RAILWAY_PUBLIC_DOMAIN) console.log(`  Public URL: https://${process.env.RAILWAY_PUBLIC_DOMAIN}`);
   if (PORT === 25565) {
@@ -577,11 +578,11 @@ let shuttingDown = false;
 /** Stop every server cleanly, then exit. An update exits with the supervisor's restart code. */
 async function shutdown(reason, code = 0) {
   if (shuttingDown) {
-    console.log('[webmc] Forcing exit');
+    console.log('[webbmc] Forcing exit');
     process.exit(1);
   }
   shuttingDown = true;
-  console.log(reason === 'update' ? '\n[webmc] Updated. Stopping servers to restart the panel...' : `\n[webmc] ${reason} received. Stopping servers...`);
+  console.log(reason === 'update' ? '\n[webbmc] Updated. Stopping servers to restart the panel...' : `\n[webbmc] ${reason} received. Stopping servers...`);
   server.close();
   await manager.stopAll(45000);
   await playit.stop();
@@ -590,5 +591,5 @@ async function shutdown(reason, code = 0) {
 }
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('uncaughtException', (err) => console.error('[webmc] Uncaught error:', err));
-process.on('unhandledRejection', (err) => console.error('[webmc] Unhandled rejection:', err));
+process.on('uncaughtException', (err) => console.error('[webbmc] Uncaught error:', err));
+process.on('unhandledRejection', (err) => console.error('[webbmc] Unhandled rejection:', err));

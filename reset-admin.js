@@ -1,5 +1,5 @@
 'use strict';
-// Forgot the admin password? Run this in a terminal on the machine (or container) running WebMC:
+// Forgot the admin password? Run this in a terminal on the machine (or container) running WebbMC:
 //
 //   node reset-admin.js              the admin account (creates one called "admin" if there is none)
 //   node reset-admin.js <username>   that account; it becomes an admin if it is not one already

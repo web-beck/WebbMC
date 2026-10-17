@@ -2,7 +2,7 @@
   "name": "webbmc",
   "version": "1.0.0",
   "private": true,
-  "description": "WebMC: a self-hosted Minecraft server panel in WebBeck colors. No dependencies. Optional Google sign-in.",
+  "description": "WebbMC: a self-hosted Minecraft server panel in WebBeck colors. No dependencies. Optional Google sign-in.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

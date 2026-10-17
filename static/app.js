@@ -1,5 +1,5 @@
 'use strict';
-/* WebMC panel UI. Vanilla JS, hash-routed, talks to the JSON API in server.js. */
+/* WebbMC panel UI. Vanilla JS, hash-routed, talks to the JSON API in server.js. */
 
 // ================================================================ helpers
 
@@ -378,7 +378,7 @@ document.addEventListener('click', async (e) => {
 function renderChrome() {
   const { host, panel } = state.overview;
   const servers = myServers();
-  const nameHtml = panel.name === 'WebMC' ? 'Web<span class="text-gradient">MC</span>' : esc(panel.name);
+  const nameHtml = panel.name === 'WebbMC' ? 'Webb<span class="text-gradient">MC</span>' : esc(panel.name);
   $$('.brand-name').forEach((el) => (el.innerHTML = nameHtml));
   document.title = `${panel.name} Server Panel`;
 
@@ -511,7 +511,7 @@ $('#notif-panel').addEventListener('click', async (e) => {
   try {
     const u = await api('POST', '/api/update/check');
     if (u.error) toast(`Could not check for updates: ${u.error}`, 'bad');
-    else if (!u.available) toast(u.mode === 'none' ? 'This copy cannot check for updates' : 'WebMC is up to date', 'ok');
+    else if (!u.available) toast(u.mode === 'none' ? 'This copy cannot check for updates' : 'WebbMC is up to date', 'ok');
     await loadNotif();
   } catch (err) {
     toast(err.message, 'bad');
@@ -542,28 +542,34 @@ async function updateNow() {
   const running = (state.overview?.servers || []).filter((s) => s.pid).length;
   const ok = await confirmBox(
     'Stop the servers and update?',
-    `WebMC downloads the update, stops ${running ? `the ${running} running server${running === 1 ? '' : 's'} (players are disconnected)` : 'every server'} and ${
+    `WebbMC downloads the update, stops ${running ? `the ${running} running server${running === 1 ? '' : 's'} (players are disconnected)` : 'every server'} and ${
       u.restarts ? 'restarts. Servers that were running start again afterwards.' : 'stops. Start it again with "node server.js" to finish.'
     }`,
     { danger: true, confirmText: 'Stop servers and update' },
   );
   if (!ok) return;
   closeNotif();
+  await restartPanel('Updating WebbMC', () => api('POST', '/api/update'), u.restarts, 'The update is installed');
+}
+
+/** Run `request` (which makes the panel restart), then show a waiting box and reload once the new panel answers. */
+async function restartPanel(heading, request, restarts, doneText) {
   let boot = null;
   try {
     boot = (await fetch('/api/health').then((r) => r.json())).boot;
     state.updating = true;
-    await api('POST', '/api/update');
+    await request();
   } catch (err) {
     state.updating = false;
-    return toast(err.message, 'bad');
+    toast(err.message, 'bad');
+    return false;
   }
   const wrap = document.createElement('div');
   wrap.className = 'modal-backdrop';
-  wrap.innerHTML = `<div class="modal" role="alertdialog" aria-live="polite"><h2>Updating WebMC</h2><p id="upd-msg">Stopping the servers. This can take up to a minute.</p></div>`;
+  wrap.innerHTML = `<div class="modal" role="alertdialog" aria-live="polite"><h2>${esc(heading)}</h2><p id="upd-msg">Stopping the servers. This can take up to a minute.</p></div>`;
   document.body.append(wrap);
-  if (!u.restarts) {
-    $('#upd-msg').textContent = 'The update is installed and the panel is stopping. Start it again with "node server.js"; this page reloads when it is back.';
+  if (!restarts) {
+    $('#upd-msg').textContent = `${doneText} and the panel is stopping. Start it again with "node server.js"; this page reloads when it is back.`;
   }
   // A new boot id means the restarted panel is answering.
   const wait = async () => {
@@ -571,11 +577,43 @@ async function updateNow() {
       const h = await fetch('/api/health', { cache: 'no-store' }).then((r) => r.json());
       if (h.boot && h.boot !== boot) return location.reload();
     } catch {
-      $('#upd-msg').textContent = u.restarts ? 'Restarting the panel...' : $('#upd-msg').textContent;
+      $('#upd-msg').textContent = restarts ? 'Restarting the panel...' : $('#upd-msg').textContent;
     }
     setTimeout(wait, 2000);
   };
   setTimeout(wait, 2000);
+  return true;
+}
+
+/** "stable" for the repository's default branch, "development" for dev, otherwise nothing. */
+const branchKind = (name, u) => (name === u.defaultBranch ? 'stable' : /^(dev|develop|development)$/i.test(name) ? 'development' : '');
+
+/** Warn, then switch the panel to another branch and restart it. */
+async function switchBranch(name, u) {
+  const kind = branchKind(name, u);
+  const from = u.branch ? `<span class="mono">${esc(u.branch)}</span>` : 'the version that runs now';
+  const running = (state.overview?.servers || []).filter((s) => s.pid).length;
+  const risk =
+    kind === 'stable'
+      ? `<strong>${esc(name)} is the stable version, and it can be older than ${from}.</strong> Features that only exist on ${from} go away, and settings or server data saved by the newer code may not load correctly.`
+      : `<strong>${esc(name)} is ${kind === 'development' ? 'the development branch' : 'not the stable branch'}.</strong> It gets changes before they are finished and tested, so parts of the panel can break, and in the worst case data can be lost.${
+          u.defaultBranch ? ` You can switch back to <span class="mono">${esc(u.defaultBranch)}</span> here at any time.` : ''
+        }`;
+  const ok = await modal({
+    title: `Switch WebbMC to ${name}?`,
+    body: `${notice(risk, 'warn')}
+      <p class="muted" style="margin:0">Back up important worlds first (each server's <strong>Backups</strong> tab). WebbMC then switches to <span class="mono">${esc(name)}</span>, stops ${
+        running ? `the ${running} running server${running === 1 ? '' : 's'} (players are disconnected)` : 'every server'
+      } and ${u.restarts ? 'restarts. Servers that were running start again afterwards.' : 'stops. Start it again with "node server.js" to finish.'}</p>
+      <label class="check"><input type="checkbox" name="ack"> <span>I understand the risks of switching to ${esc(name)}</span></label>`,
+    danger: true,
+    confirmText: `Switch to ${name}`,
+    onConfirm: (form) => {
+      if (!form.elements.ack.checked) throw new Error('Tick the box to confirm first');
+    },
+  });
+  if (!ok) return;
+  await restartPanel(`Switching WebbMC to ${name}`, () => api('POST', '/api/update/branch', { branch: name }), u.restarts, `WebbMC switched to ${name}`);
 }
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-update-now]')) updateNow();
@@ -701,7 +739,7 @@ function NewServer(root) {
   });
 
   root.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Create</div><h1>New server</h1><p>Pick the software, choose a version and WebMC downloads and sets it up for you.</p></div></div>
+    <div class="page-head"><div><div class="eyebrow">Create</div><h1>New server</h1><p>Pick the software, choose a version and WebbMC downloads and sets it up for you.</p></div></div>
     <form class="form" id="ns-form" novalidate>
       <section class="card panel-card">
         <h2>1. Software</h2><p class="sub">What should this server run?</p>
@@ -719,7 +757,7 @@ function NewServer(root) {
           <div class="field"><label for="ns-name">Server name</label><input class="input" id="ns-name" name="name" placeholder="Survival SMP" maxlength="64" required></div>
           <div class="field" data-for="download"><label for="ns-version" id="ns-version-label">Minecraft version</label><select class="input" id="ns-version" name="version"></select></div>
           <div class="field" data-not="import"><label for="ns-port">Port</label><input class="input" id="ns-port" name="port" type="number" min="1" max="65535"><span class="hint" id="ns-port-hint">Players connect to this port. 25565 is the default.</span></div>
-          <div class="field" data-for="import"><label for="ns-dir">Existing server folder</label><input class="input mono" id="ns-dir" name="importDir" placeholder="C:\\Minecraft\\my-server"><span class="hint">Full path on the machine running WebMC.</span></div>
+          <div class="field" data-for="import"><label for="ns-dir">Existing server folder</label><input class="input mono" id="ns-dir" name="importDir" placeholder="C:\\Minecraft\\my-server"><span class="hint">Full path on the machine running WebbMC.</span></div>
           <div class="field" data-for="import"><label for="ns-jar">Jar file (optional)</label><input class="input mono" id="ns-jar" name="jar" placeholder="Detected automatically"></div>
           ${
             me().admin
@@ -1314,7 +1352,7 @@ function PlayersTab(el, ctx) {
       ? `${notice('The server is offline. Start it to manage players: actions here are sent as console commands.', 'warn')}<div style="height:16px"></div>`
       : data.pingError
         ? `${notice(
-            `The player count may be off: ${esc(data.pingError)}. WebMC is counting joins from the console instead. ${proxy ? `Check the listening address in <span class="mono">${esc(ctx.srv.configFile)}</span>.` : 'Check <span class="mono">server-ip</span> and <span class="mono">enable-status</span> in Properties.'}`,
+            `The player count may be off: ${esc(data.pingError)}. WebbMC is counting joins from the console instead. ${proxy ? `Check the listening address in <span class="mono">${esc(ctx.srv.configFile)}</span>.` : 'Check <span class="mono">server-ip</span> and <span class="mono">enable-status</span> in Properties.'}`,
             'warn',
           )}<div style="height:16px"></div>`
         : proxy
@@ -1662,7 +1700,7 @@ function AddonsTab(el, ctx) {
           )}</strong> are shown. Downloads are checked and required dependencies are installed too.`
         : `Search <a href="https://modrinth.com" target="_blank" rel="noopener">Modrinth</a> for ${what()}s that run on <strong>${esc(
             target(),
-          )}</strong>. WebMC picks the right build, checks the download and installs required dependencies${
+          )}</strong>. WebbMC picks the right build, checks the download and installs required dependencies${
             info.kind === 'datapacks' ? ` into <span class="mono">${esc(info.dir)}</span>` : ''
           }.`,
     );
@@ -3441,7 +3479,7 @@ function ServerSettingsTab(el, ctx) {
       danger: true,
       confirmText: 'Delete server',
       body: `
-        <p>This removes the server from WebMC. Type its name to confirm.</p>
+        <p>This removes the server from WebbMC. Type its name to confirm.</p>
         <input class="input" name="confirm" placeholder="${esc(ctx.srv.name)}" autofocus autocomplete="off">
         ${
           managed
@@ -4385,7 +4423,7 @@ async function renderUsers(card, settings, info) {
 
 const PLAYIT_CLAIM = {
   visit: 'Open the link, then sign in to playit.gg or make a free account.',
-  approve: 'Now approve WebMC on the playit.gg page you opened.',
+  approve: 'Now approve WebbMC on the playit.gg page you opened.',
   finishing: 'Approved. Finishing the setup...',
 };
 const PLAYIT_HOME = 'https://playit.gg/account/tunnels';
@@ -4506,25 +4544,56 @@ async function renderUpdates(card, check = false) {
   const cur = u.current
     ? `<span class="mono">${esc(u.current.sha)}</span> ${esc(u.current.subject)}${u.current.t ? ` <span class="faint">(${esc(fmtDate(u.current.t))})</span>` : ''}`
     : '<span class="faint">Unknown</span>';
+  let branchRow = '';
+  if (u.mode === 'git' && u.branches?.length) {
+    const opts = u.branches
+      .map((b) => {
+        const kind = branchKind(b.name, u);
+        return `<option value="${esc(b.name)}" ${b.name === u.branch ? 'selected' : ''}>${esc(b.name)}${kind ? ` (${kind})` : ''}</option>`;
+      })
+      .join('');
+    branchRow = `<dt>Branch</dt><dd><div class="row branch-pick">
+        <select class="input" id="upd-branch" aria-label="Branch">${u.branch ? '' : '<option value="" selected disabled>Detached commit</option>'}${opts}</select>
+        <button class="btn btn-sm" data-act="switch" disabled>Switch</button></div>
+        <div class="faint small" id="upd-branch-hint" style="margin-top:6px"></div></dd>`;
+  } else if (u.branch) branchRow = `<dt>Branch</dt><dd class="mono">${esc(u.branch)}</dd>`;
   let body;
   if (u.mode === 'none') body = notice(esc(u.applyNote));
   else if (u.error) body = notice(`Could not check for updates: ${esc(u.error)}`, 'warn');
   else if (u.available) {
     body = `
-      ${notice(`<strong>${u.behind} new change${u.behind === 1 ? '' : 's'} on GitHub.</strong> ${u.canApply ? (u.restarts ? 'Updating stops every server, installs the update and restarts the panel. Servers that were running start again.' : esc(u.applyNote)) : esc(u.applyNote)}`)}
+      ${notice(`<strong>${u.behind} new change${u.behind === 1 ? '' : 's'} on ${u.branch ? `<span class="mono">${esc(u.branch)}</span>` : 'GitHub'}.</strong> ${u.canApply ? (u.restarts ? 'Updating stops every server, installs the update and restarts the panel. Servers that were running start again.' : esc(u.applyNote)) : esc(u.applyNote)}`)}
       <div class="feed card">${u.commits
         .slice(0, 10)
         .map((c) => `<div class="item"><span class="mono small">${esc(c.sha)}</span><span class="faint small nowrap">${c.t ? fmtAgo(c.t) : ''}</span><span class="msg">${esc(c.subject)}</span></div>`)
         .join('')}${u.commits.length > 10 ? `<div class="item"><span></span><span></span><span class="faint">and ${u.commits.length - 10} more</span></div>` : ''}</div>
       ${u.dirty ? notice('This folder has local edits to the panel. The update works when they do not touch the same files; otherwise git refuses and nothing changes.', 'warn') : ''}
       ${u.canApply ? `<div><button class="btn btn-accent" data-update-now>${icon('download')}Stop servers and update</button></div>` : ''}`;
-  } else body = `<p class="muted" style="margin:0">${icon('shield').replace('<svg', '<svg style="width:16px;height:16px;vertical-align:-3px;color:var(--accent)"')} WebMC is up to date.</p>`;
+  } else body = `<p class="muted" style="margin:0">${icon('shield').replace('<svg', '<svg style="width:16px;height:16px;vertical-align:-3px;color:var(--accent)"')} WebbMC is up to date.</p>`;
   card.innerHTML = `
     <div class="row"><h2>Updates</h2><span class="spacer"></span>${
       u.mode !== 'none' ? `<button class="btn btn-sm" data-act="check">${icon('restart')}Check now</button>` : ''
     }</div>
-    <dl class="kv"><dt>Running</dt><dd>${cur}</dd>${u.checkedAt ? `<dt>Last checked</dt><dd>${fmtAgo(u.checkedAt)}</dd>` : ''}</dl>
+    <dl class="kv"><dt>Running</dt><dd>${cur}</dd>${branchRow}${u.checkedAt ? `<dt>Last checked</dt><dd>${fmtAgo(u.checkedAt)}</dd>` : ''}</dl>
     ${body}`;
+  const pick = $('#upd-branch', card);
+  if (pick) {
+    const go = $('[data-act="switch"]', card);
+    const hint = $('#upd-branch-hint', card);
+    const show = () => {
+      const b = u.branches.find((x) => x.name === pick.value);
+      const other = b && b.name !== u.branch;
+      go.disabled = !other || !u.canApply;
+      hint.innerHTML = !b
+        ? ''
+        : `${other ? 'Latest' : 'This copy runs this branch. Latest on GitHub'}: <span class="mono">${esc(b.sha)}</span> ${esc(b.subject)}${b.t ? ` (${fmtAgo(b.t)})` : ''}${
+            other && branchKind(b.name, u) !== 'stable' ? ` · <span style="color:var(--warn)">not the stable version</span>` : ''
+          }`;
+    };
+    pick.onchange = show;
+    go.onclick = () => switchBranch(pick.value, u);
+    show();
+  }
   const btn = $('[data-act="check"]', card);
   if (btn)
     btn.onclick = () => {
@@ -4565,7 +4634,7 @@ function PanelSettings(root, args = []) {
       <div class="card panel-card">
         <h2>About this panel</h2>
         <dl class="kv" style="margin-top:12px">
-          <dt>Version</dt><dd>WebMC ${esc(info.version)}</dd>
+          <dt>Version</dt><dd>WebbMC ${esc(info.version)}</dd>
           <dt>Listening on</dt><dd class="mono">${esc(info.bind)}</dd>
           <dt>Data folder</dt><dd class="mono small">${esc(info.dataDir)}</dd>
           ${info.railway ? `<dt>Hosting</dt><dd>Railway${info.volume ? ` (volume at <span class="mono">${esc(info.volume)}</span>)` : ' (no volume attached)'}</dd>` : ''}
