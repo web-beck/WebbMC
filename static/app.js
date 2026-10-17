@@ -552,8 +552,11 @@ async function updateNow() {
   await restartPanel('Updating WebbMC', () => api('POST', '/api/update'), u.restarts, 'The update is installed');
 }
 
-/** Run `request` (which makes the panel restart), then show a waiting box and reload once the new panel answers. */
-async function restartPanel(heading, request, restarts, doneText) {
+/**
+ * Run `request` (which makes the panel restart), then show a waiting box and reload once the new panel answers.
+ * With `origin` (the panel moves to another port), it waits for that address and opens it.
+ */
+async function restartPanel(heading, request, restarts, doneText, origin = '') {
   let boot = null;
   try {
     boot = (await fetch('/api/health').then((r) => r.json())).boot;
@@ -573,6 +576,16 @@ async function restartPanel(heading, request, restarts, doneText) {
   }
   // A new boot id means the restarted panel is answering.
   const wait = async () => {
+    if (origin) {
+      // Another port is another origin, so only "does it answer" can be seen (no-cors), which is enough.
+      try {
+        await fetch(`${origin}/api/health`, { mode: 'no-cors', cache: 'no-store' });
+        return location.assign(`${origin}/${location.hash}`);
+      } catch {
+        $('#upd-msg').textContent = `Restarting the panel on ${origin}...`;
+      }
+      return setTimeout(wait, 2000);
+    }
     try {
       const h = await fetch('/api/health', { cache: 'no-store' }).then((r) => r.json());
       if (h.boot && h.boot !== boot) return location.reload();
@@ -4603,15 +4616,254 @@ async function renderUpdates(card, check = false) {
     };
 }
 
+/** The value of KEY in .env text, roughly as Node reads it (for warnings before saving the text view). */
+function envValue(text, key) {
+  let value;
+  for (const line of String(text).split('\n')) {
+    const m = new RegExp(`^\\s*(?:export\\s+)?${key}\\s*=\\s*(.*)$`).exec(line);
+    if (!m) continue;
+    const v = m[1].trim();
+    const q = v[0];
+    value = (q === '"' || q === "'" || q === '`') && v.indexOf(q, 1) > 0 ? v.slice(1, v.indexOf(q, 1)) : v.replace(/#.*$/, '').trim();
+  }
+  return value ?? '';
+}
+
+const ENV_GROUPS = ['Sign-in', 'Address', 'Storage', 'Other', 'Custom'];
+
+/**
+ * Panel settings > .env: every variable in the .env file, as fields or as the whole file. WebbMC reads .env when it
+ * starts, so saved changes wait for a restart. Returns the view's cleanup (none).
+ */
+function renderEnv(box) {
+  let d = null;
+  let mode = pref.get('envMode', 'fields');
+  let dirty = false;
+
+  const load = async () => {
+    try {
+      d = await api('GET', '/api/env');
+    } catch (err) {
+      box.innerHTML = notice(esc(err.message), 'warn');
+      return;
+    }
+    dirty = false;
+    draw();
+  };
+
+  /** Ask before risky changes (port, address, data folder, session secret). changes: [{ key, from, to }]. */
+  const confirmRisky = async (changes) => {
+    const risky = changes.filter((c) => d.vars.find((v) => v.key === c.key)?.risky);
+    if (!risky.length) return true;
+    const items = risky
+      .map((c) => `<li><span class="mono">${esc(c.key)}</span> ${c.to ? `= <span class="mono">${esc(d.vars.find((v) => v.key === c.key).secret ? '••••' : c.to)}</span>` : 'is now blank'}: ${esc(d.vars.find((v) => v.key === c.key).risky)}</li>`)
+      .join('');
+    return modal({
+      title: 'Save these changes?',
+      body: `<ul class="stack-sm" style="margin:0;padding-left:18px">${items}</ul><p class="muted" style="margin:0">They apply after the panel restarts.</p>`,
+      danger: true,
+      confirmText: 'Save anyway',
+    }).then(Boolean);
+  };
+
+  const saved = (r) => {
+    d = r;
+    dirty = false;
+    toast(r.changed.length ? `Saved .env (${r.changed.join(', ')}). Restart the panel to apply.` : 'Nothing changed', r.changed.length ? 'ok' : 'info');
+    draw();
+  };
+
+  const restart = async () => {
+    const pending = d.vars.filter((v) => v.pending);
+    const port = pending.find((v) => v.key === 'WEBMC_PORT');
+    const newPort = port ? port.value || '8420' : '';
+    const origin = newPort && newPort !== location.port ? `${location.protocol}//${location.hostname}:${newPort}` : '';
+    const running = (state.overview?.servers || []).filter((s) => s.pid).length;
+    const ok = await confirmBox(
+      'Restart WebbMC?',
+      `WebbMC stops ${running ? `the ${running} running server${running === 1 ? '' : 's'} (players are disconnected)` : 'every server'}, restarts with the new .env and starts the servers that were running again.${
+        origin ? ` It then answers on port ${newPort}, so this page moves to ${origin}.` : ''
+      }`,
+      { danger: true, confirmText: 'Restart now' },
+    );
+    if (ok) await restartPanel('Restarting WebbMC', () => api('POST', '/api/env/restart'), true, 'WebbMC is restarting', origin);
+  };
+
+  function statusCard() {
+    const pending = d.vars.filter((v) => v.pending);
+    return `
+      <div class="card panel-card stack-sm">
+        <div class="row"><h2>.env</h2><span class="spacer"></span>
+          <div class="seg" role="group" aria-label="View"><button type="button" data-mode="fields" class="${mode === 'fields' ? 'active' : ''}">Fields</button><button type="button" data-mode="text" class="${mode === 'text' ? 'active' : ''}">Text</button></div>
+        </div>
+        <p class="muted" style="margin:0"><span class="mono small">${esc(d.path)}</span><br>WebbMC reads this file when it starts, so saved changes apply after a restart. Real environment variables (set in the shell, pm2 or your host) win over it.</p>
+        ${d.railway ? notice('<strong>On Railway, set variables in the service&#39;s Variables tab.</strong> A .env file here is lost on the next deploy.', 'warn') : ''}
+        ${d.exists ? '' : notice('There is no .env file yet. Saving creates one from <span class="mono">.env.example</span>.')}
+        ${
+          pending.length
+            ? `${notice(`<strong>Waiting for a restart:</strong> ${pending.map((v) => `<span class="mono">${esc(v.key)}</span>`).join(', ')}. The panel still runs with the values it started with.${d.restarts ? '' : ' Stop it (Ctrl+C) and run <span class="mono">node server.js</span> again to apply them.'}`, 'warn')}
+               ${d.restarts ? `<div><button type="button" class="btn btn-accent" data-act="restart">${icon('restart')}Restart now</button></div>` : ''}`
+            : ''
+        }
+      </div>`;
+  }
+
+  function fieldHtml(v) {
+    const id = `env-${v.key}`;
+    const tags = [
+      v.overridden ? '<span class="tag warn" title="A real environment variable sets this, so the panel ignores the value in .env">set by the environment</span>' : '',
+      v.pending ? '<span class="tag">restart to apply</span>' : '',
+    ].join('');
+    return `<div class="field env-field" data-key="${esc(v.key)}">
+      <label for="${id}"><span class="mono">${esc(v.key)}</span>${tags}</label>
+      <div class="input-group">
+        <input class="input mono" id="${id}" name="${esc(v.key)}" type="${v.secret ? 'password' : 'text'}" value="${esc(v.value)}" placeholder="${esc(v.placeholder)}" autocomplete="off" spellcheck="false">
+        ${v.secret ? `<button type="button" class="btn" data-reveal="${esc(v.key)}" style="height:40px">Show</button>` : ''}
+        ${v.known ? '' : `<button type="button" class="icon-btn danger" data-remove="${esc(v.key)}" title="Remove ${esc(v.key)}" aria-label="Remove ${esc(v.key)}" style="height:40px;width:40px">${icon('trash')}</button>`}
+      </div>
+      ${v.hint ? `<span class="hint">${esc(v.hint)}</span>` : ''}
+      ${v.overridden ? '<span class="hint" style="color:var(--warn)">Set by a real environment variable, which wins: editing it here does nothing.</span>' : ''}
+      ${v.risky ? `<span class="hint" style="color:var(--warn)">${esc(v.risky)}</span>` : ''}
+    </div>`;
+  }
+
+  function fieldsCard() {
+    const shown = d.vars.filter((v) => v.known || v.inFile);
+    return `
+      <form class="card panel-card form" id="env-form" novalidate>
+        ${ENV_GROUPS.map((g) => {
+          const vars = shown.filter((v) => v.group === g);
+          if (g !== 'Custom' && !vars.length) return '';
+          return `<h3 class="env-group">${g === 'Custom' ? 'Other variables in the file' : esc(g)}</h3>
+            <div class="form-grid" ${g === 'Custom' ? 'id="env-custom"' : ''}>${vars.map(fieldHtml).join('')}</div>
+            ${g === 'Custom' ? `${vars.length ? '' : '<p class="faint small" id="env-none" style="margin:0">None yet.</p>'}
+              <div class="env-add">
+                <input class="input mono" id="env-new-key" placeholder="NEW_VARIABLE" autocomplete="off" spellcheck="false" aria-label="New variable name">
+                <input class="input mono" id="env-new-value" placeholder="value" autocomplete="off" spellcheck="false" aria-label="New variable value">
+                <button type="button" class="btn" data-act="add">${icon('plus')}Add</button>
+              </div>` : ''}`;
+        }).join('')}
+        <div class="form-actions"><button class="btn btn-accent" type="submit">${icon('save')}Save .env</button></div>
+      </form>`;
+  }
+
+  function textCard() {
+    return `
+      <form class="card panel-card form" id="env-text" novalidate>
+        <div class="field">
+          <label for="env-raw">The whole file</label>
+          <textarea class="input" id="env-raw" rows="24" spellcheck="false" autocomplete="off">${esc(d.text)}</textarea>
+          <span class="hint">Every line is <span class="mono">KEY=value</span>, a <span class="mono"># comment</span> or blank. This view shows secret values in plain text.</span>
+        </div>
+        <div class="form-actions"><button class="btn btn-accent" type="submit">${icon('save')}Save .env</button></div>
+      </form>`;
+  }
+
+  function draw() {
+    box.innerHTML = statusCard() + (mode === 'text' ? textCard() : fieldsCard());
+    $('[data-act="restart"]', box)?.addEventListener('click', restart);
+    $$('[data-mode]', box).forEach((b) =>
+      b.addEventListener('click', async () => {
+        if (b.dataset.mode === mode) return;
+        if (dirty && !(await confirmBox('Discard your changes?', 'Switching views drops the changes you have not saved.', { confirmText: 'Discard' }))) return;
+        mode = b.dataset.mode;
+        pref.set('envMode', mode);
+        dirty = false;
+        draw();
+      }),
+    );
+    box.addEventListener('input', () => (dirty = true), { once: true });
+    if (mode === 'text') wireText();
+    else wireFields();
+  }
+
+  function wireFields() {
+    const form = $('#env-form', box);
+    const removed = new Set();
+    form.addEventListener('click', (e) => {
+      const reveal = e.target.closest('[data-reveal]');
+      if (reveal) {
+        const input = form.elements[reveal.dataset.reveal];
+        input.type = input.type === 'password' ? 'text' : 'password';
+        reveal.textContent = input.type === 'password' ? 'Show' : 'Hide';
+      }
+      const rm = e.target.closest('[data-remove]');
+      if (rm) {
+        removed.add(rm.dataset.remove);
+        rm.closest('.env-field').remove();
+        dirty = true;
+      }
+      if (e.target.closest('[data-act="add"]')) {
+        const key = $('#env-new-key', form).value.trim();
+        const value = $('#env-new-value', form).value;
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return toast('Names use letters, digits and _, and do not start with a digit', 'bad');
+        if (form.elements[key]) return toast(`${key} is already on this page`, 'bad');
+        removed.delete(key);
+        $('#env-none', form)?.remove();
+        $('#env-custom', form).insertAdjacentHTML('beforeend', fieldHtml({ key, value, known: false, secret: /SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE|API_?KEY/i.test(key), hint: 'New: saved with the others.' }));
+        $('#env-new-key', form).value = '';
+        $('#env-new-value', form).value = '';
+        dirty = true;
+      }
+    });
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const set = {};
+      const changes = [];
+      for (const field of $$('.env-field', form)) {
+        const key = field.dataset.key;
+        const value = form.elements[key].value;
+        const was = d.vars.find((v) => v.key === key);
+        if (!was || !was.inFile || value !== was.value) {
+          if (!was?.inFile && value === '' && was) continue; // a known variable left blank stays out of the file
+          set[key] = value;
+          changes.push({ key, from: was?.value ?? '', to: value });
+        }
+      }
+      if (!Object.keys(set).length && !removed.size) return toast('Nothing changed', 'info');
+      if (!(await confirmRisky(changes))) return;
+      try {
+        saved(await api('PUT', '/api/env', { set, remove: [...removed] }));
+      } catch (err) {
+        toast(err.message, 'bad');
+      }
+    };
+  }
+
+  function wireText() {
+    const form = $('#env-text', box);
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const text = $('#env-raw', form).value;
+      const changes = d.vars.filter((v) => v.risky && envValue(text, v.key) !== envValue(d.text, v.key)).map((v) => ({ key: v.key, to: envValue(text, v.key) }));
+      if (!(await confirmRisky(changes))) return;
+      try {
+        saved(await api('PUT', '/api/env/text', { text }));
+      } catch (err) {
+        toast(err.message, 'bad');
+      }
+    };
+  }
+
+  load();
+  return {};
+}
+
 function PanelSettings(root, args = []) {
   let stopPlayit = null;
   if (!me().admin) {
     root.innerHTML = `<div class="card empty-state"><h2>Admins only</h2><p class="muted">Panel settings are managed by the panel admin.</p><a class="btn" href="#/">Back to dashboard</a></div>`;
     return {};
   }
+  const tab = args[0] === 'env' ? 'env' : 'main';
   root.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Configure</div><h1>Panel settings</h1><p>Accounts, defaults for new servers and how the panel runs.</p></div></div>
+    <nav class="tabs" style="margin-top:4px">
+      <a href="#/settings" class="${tab === 'main' ? 'active' : ''}">${icon('cog')}Settings</a>
+      <a href="#/settings/env" class="${tab === 'env' ? 'active' : ''}">${icon('file')}.env</a>
+    </nav>
     <div class="stack" id="ps"><p class="muted">Loading...</p></div>`;
+  if (tab === 'env') return renderEnv($('#ps', root));
   api('GET', '/api/settings').then(({ settings: s, info }) => {
     $('#ps', root).innerHTML = `
       <div class="card panel-card" id="ps-users"><h2>Accounts</h2><p class="muted">Loading...</p></div>

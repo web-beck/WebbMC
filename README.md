@@ -50,6 +50,7 @@ Java does not need to be installed. Each server uses the Java its Minecraft vers
 - **Schedules**: run commands, restart, start, stop or back up on an interval or at a time of day.
 - **Change version or software** of an existing server in place.
 - **Activity log** of everything the panel does.
+- **.env editor** (admins, Panel settings → .env): edit the panel's settings file as fields or as text, then restart from the page to apply them.
 - **Sharing**: a server's owner can share it with other accounts in the server's **Settings** tab. People it is shared with can run and change it like the owner, but cannot delete it or change who it is shared with. Shared servers show a "Shared by" badge.
 - **Notification center** (the bell in the top right): crashes and failures on the servers you can see, and servers shared with you. Admins also see panel updates and accounts waiting for approval.
 - **Panel updates**: the panel checks for a new version every 6 hours (or on **Check now** in **Panel settings → Updates**) and tells admins through the bell. In a git checkout, **Stop servers and update** runs `git pull`, stops every server, restarts the panel and starts the servers that were running. If the pull fails, nothing is stopped. The same card has a **Branch** picker to switch between `main` (stable) and `dev` (development), or any other branch that has the panel. Switching warns first (development can be broken; going back to stable can mean an older version), then stops the servers and restarts on the new branch. It refuses when the folder has local edits to tracked files. On Railway the panel compares its commit with GitHub, and Railway deploys new commits itself; pick the branch in Railway's service settings instead.
@@ -57,7 +58,7 @@ Java does not need to be installed. Each server uses the Java its Minecraft vers
 
 ## Configuration
 
-Settings come from environment variables. On your own computer, put them in a file called **`.env` in this folder** (next to `server.js`): copy `.env.example`, which explains each one, and restart the panel after editing it. `.env` is ignored by git and left out of the Docker image. **On Railway, set them in the service's Variables tab** instead. Real environment variables take priority over `.env`.
+Settings come from environment variables. On your own computer, put them in a file called **`.env` in this folder** (next to `server.js`): copy `.env.example`, which explains each one, and restart the panel after editing it. Admins can also edit it in the panel: **Panel settings → .env** shows every variable as a field (secrets hidden until you press Show) or the whole file as text, keeps the file's comments, warns before changes that can lock you out (port, listen address, data folder), and has a **Restart now** button to apply them. `.env` is ignored by git and left out of the Docker image. **On Railway, set them in the service's Variables tab** instead. Real environment variables take priority over `.env`.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |

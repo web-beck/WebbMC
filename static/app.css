@@ -384,6 +384,12 @@ table.table { width: 100%; border-collapse: collapse; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .branch-pick { gap: 8px; }
+.env-group { margin: 22px 0 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+.env-group:first-child { margin-top: 0; }
+.env-field label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.env-field .input { min-width: 0; }
+.env-add { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 8px; margin-top: 12px; }
+@media (max-width: 560px) { .env-add { grid-template-columns: minmax(0, 1fr); } }
 .branch-pick select.input { width: auto; flex: 0 1 300px; min-width: 0; height: 34px; }
 
 /* properties */

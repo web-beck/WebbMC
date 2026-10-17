@@ -11,6 +11,7 @@ if (require('./lib/supervisor').run(__dirname)) return;
 
 // Settings can live in a .env file next to this one (see .env.example). Real environment variables win,
 // so on Railway the service's Variables tab is what counts.
+const systemEnv = new Set(Object.keys(process.env)); // for Panel settings > .env: the variables .env cannot change
 try {
   process.loadEnvFile(path.join(__dirname, '.env'));
 } catch (err) {
@@ -34,6 +35,8 @@ const playit = require('./lib/playit');
 const java = require('./lib/java');
 const ports = require('./lib/ports');
 const updates = require('./lib/updates');
+const envfile = require('./lib/envfile');
+envfile.init(systemEnv);
 const notifications = require('./lib/notifications');
 const { httpError, readJson, readBody, sendJson, int } = require('./lib/util');
 
@@ -369,6 +372,16 @@ route('GET', '/api/update', () => updates.status(), { admin: true });
 route('POST', '/api/update/check', () => updates.check(), { admin: true });
 route('POST', '/api/update', ({ user }) => updates.apply(user), { admin: true });
 route('POST', '/api/update/branch', ({ user, body }) => updates.switchBranch(user, body.branch), { admin: true });
+
+// Admin: the .env file (read at startup, so changes apply after a restart)
+const envSaved = (user, changed) => {
+  if (changed.length) store.logActivity(null, `${user.id || 'An admin'} changed .env (${changed.join(', ')}). It applies after the panel restarts.`);
+  return { ...envfile.status(), changed };
+};
+route('GET', '/api/env', () => envfile.status(), { admin: true });
+route('PUT', '/api/env', ({ user, body }) => envSaved(user, envfile.update(body)), { admin: true });
+route('PUT', '/api/env/text', ({ user, body }) => envSaved(user, envfile.replaceText(body.text)), { admin: true });
+route('POST', '/api/env/restart', ({ user }) => updates.restartPanel(user, 'to apply .env'), { admin: true });
 
 route('GET', '/api/activity', ({ user }) => {
   if (user.admin) return store.state.activity;
