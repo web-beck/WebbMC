@@ -1,0 +1,9 @@
+# Docker builds (Railway) only need the panel's code. Plain exclusions only: Railway's builder does not
+# handle "exclude everything, then !re-include" patterns reliably.
+.git
+.DS_Store
+data
+node_modules
+# Local settings and secrets. On Railway, use the service's Variables tab.
+.env
+*.md

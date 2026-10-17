@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#120a2f" />
+    <title>WebMC Server Panel</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <div class="bg-mesh" aria-hidden="true"></div>
+    <div class="bg-grid" aria-hidden="true"></div>
+
+    <div class="shell">
+      <aside class="sidebar glass" id="sidebar">
+        <a class="brand" href="#/">
+          <img src="/static/favicon.svg" alt="" width="34" height="34" />
+          <span class="brand-name" id="brand-name">Web<span class="text-gradient">MC</span></span>
+        </a>
+
+        <nav class="nav">
+          <a href="#/" data-nav="dashboard"><svg viewBox="0 0 24 24"><path d="M3 13h8V3H3zm0 8h8v-6H3zm10 0h8V11h-8zm0-18v6h8V3z"/></svg>Dashboard</a>
+          <a href="#/all" data-nav="all" class="hidden"><svg viewBox="0 0 24 24"><path d="M4 2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 12h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2zm3-9.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm0 12a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z" fill-rule="evenodd"/></svg>All servers</a>
+          <a href="#/new" data-nav="new"><svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>New server</a>
+          <a href="#/ports" data-nav="ports" class="hidden"><svg viewBox="0 0 24 24"><path d="M7 2v4H5a1 1 0 0 0-1 1v5a8 8 0 0 0 7 7.94V22h2v-2.06A8 8 0 0 0 20 12V7a1 1 0 0 0-1-1h-2V2h-2v4H9V2zm-1 6h12v4a6 6 0 0 1-12 0z"/></svg>Ports</a>
+          <a href="#/status" data-nav="status"><svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8 3 3 3-3a4.24 4.24 0 0 0-6 0zm-4-4 2 2a7.07 7.07 0 0 1 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>Server status</a>
+          <a href="#/activity" data-nav="activity"><svg viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>Activity</a>
+          <a href="#/account" data-nav="account"><svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Account</a>
+          <a href="#/settings" data-nav="settings"><svg viewBox="0 0 24 24"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7 7 0 0 0-1.7-1L15 3h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7 7 0 0 0 1.7 1L11 21h4l.4-2.6a7 7 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5A3.5 3.5 0 1 1 13 8.5a3.5 3.5 0 0 1 0 7z"/></svg>Panel settings<span class="nav-badge hidden" id="pending-badge" title="Accounts waiting for approval"></span></a>
+        </nav>
+
+        <div class="side-label">Your servers</div>
+        <div class="server-nav" id="server-nav"></div>
+
+        <div class="side-foot" id="side-foot"></div>
+      </aside>
+
+      <div class="scrim" id="scrim"></div>
+
+      <div class="main-col">
+        <header class="topbar">
+          <button class="icon-btn" id="menu-btn" aria-label="Open menu">
+            <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+          </button>
+          <a class="brand" href="#/"><img src="/static/favicon.svg" alt="" width="28" height="28" /><span class="brand-name">Web<span class="text-gradient">MC</span></span></a>
+          <div class="notif" id="notif">
+            <button class="icon-btn notif-btn" id="notif-btn" aria-label="Notifications" aria-haspopup="true" aria-expanded="false">
+              <svg viewBox="0 0 24 24"><path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4a1.5 1.5 0 0 0-3 0v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1z"/></svg>
+              <span class="notif-count hidden" id="notif-count"></span>
+            </button>
+            <div class="notif-panel hidden" id="notif-panel" role="dialog" aria-label="Notifications"></div>
+          </div>
+        </header>
+        <main class="view" id="view">
+          <div class="loading">Connecting to panel...</div>
+        </main>
+      </div>
+    </div>
+
+    <div class="toasts" id="toasts" aria-live="polite"></div>
+    <div id="modal-root"></div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
