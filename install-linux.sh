@@ -33,7 +33,7 @@ Usage: bash install-linux.sh [options]
 
   -y, --yes             Do not ask anything: use the options below, or the defaults.
   --branch main|dev     Version to install: main (stable, the default) or dev (development).
-  --port N              Panel website port (default 8420).
+  --port N              Port for the WebbMC web app (default 8420).
   --lan                 Let other computers open the panel (listens on every network interface).
   --url URL             The web address people open the panel at, such as https://mc.example.com.
   --admin NAME          Admin username (default admin). Gets a one-time password on a new install.
@@ -236,10 +236,10 @@ EOF
 
     # 2. Port.
     if [[ -z $PORT ]]; then
-      heading "2. Panel website port"
-      note "The panel's own web page. Minecraft players use other ports (25565 and up)."
+      heading "2. Web app port"
+      note "The port you open the WebbMC web app on, as in http://localhost:8420. Minecraft players use other ports (25565 and up)."
       while :; do
-        ask PORT "Port" 8420
+        ask PORT "Which port should the web app use?" 8420
         local why=''
         if ! [[ $PORT =~ $valid_port ]] || ((PORT < 1 || PORT > 65535)); then
           why="Type a number from 1 to 65535."
@@ -338,7 +338,7 @@ EOF
 
     # Summary.
     heading "Ready to install"
-    printf '  %-16s %s\n' "Folder" "$DIR" "Version" "$BRANCH" "Panel port" "$PORT" \
+    printf '  %-16s %s\n' "Folder" "$DIR" "Version" "$BRANCH" "Web app port" "$PORT" \
       "Reachable from" "$( ((LAN)) && echo 'other computers too' || echo 'this machine only')" \
       "Web address" "${URL:-none}" "Admin" "$ADMIN" "Admin emails" "${EMAILS:-none}" \
       "Google sign-in" "$([[ -n $G_ID ]] && echo on || echo off)" "pm2" "$( ((PM2)) && echo "yes, as \"$NAME\"" || echo no)"

@@ -117,7 +117,7 @@ On a desktop you can also double-click the file (choose **Run** if the file mana
 It asks a few questions first. Press Enter to accept the answer in [brackets]:
 
 1. **Version:** `main` (stable, recommended) or `dev` (development: newest features, can break).
-2. **Panel website port**, 8420 by default. It refuses ports that are already in use.
+2. **Web app port:** the port you open WebbMC on, 8420 by default (press Enter to keep it). It refuses ports that are already in use.
 3. **Who can open the panel:** only this machine (the safe default; use an SSH tunnel or a reverse proxy), or other computers too.
 4. **Web address** (optional), if you open the panel through a domain such as `https://mc.example.com`.
 5. **Admin username.** The account is created right away, and the script prints a **one-time password** for it at the end.
