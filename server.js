@@ -382,6 +382,7 @@ route('GET', '/api/env', () => envfile.status(), { admin: true });
 route('PUT', '/api/env', ({ user, body }) => envSaved(user, envfile.update(body)), { admin: true });
 route('PUT', '/api/env/text', ({ user, body }) => envSaved(user, envfile.replaceText(body.text)), { admin: true });
 route('POST', '/api/env/restart', ({ user }) => updates.restartPanel(user, 'to apply .env'), { admin: true });
+route('POST', '/api/restart', ({ user }) => updates.restartPanel(user, 'from Panel settings'), { admin: true });
 
 route('GET', '/api/activity', ({ user }) => {
   if (user.admin) return store.state.activity;
@@ -406,6 +407,8 @@ route('GET', '/api/settings', ({ user }) => {
       volume: process.env.RAILWAY_VOLUME_MOUNT_PATH || '',
       google: auth.GOOGLE,
       adminEmails: [...auth.ADMINS],
+      // What starts the panel again after Restart: pm2, the restart helper in a git checkout, or nothing.
+      restarter: process.env.pm_id !== undefined ? 'pm2' : require('./lib/supervisor').supervised() ? 'helper' : null,
     },
   };
 });
@@ -595,7 +598,8 @@ async function shutdown(reason, code = 0) {
     process.exit(1);
   }
   shuttingDown = true;
-  console.log(reason === 'update' ? '\n[webbmc] Updated. Stopping servers to restart the panel...' : `\n[webbmc] ${reason} received. Stopping servers...`);
+  const why = { update: 'Updated. Stopping servers to restart the panel...', restart: 'Restarting. Stopping servers first...' };
+  console.log(`\n[webbmc] ${why[reason] || `${reason} received. Stopping servers...`}`);
   server.close();
   await manager.stopAll(45000);
   await playit.stop();

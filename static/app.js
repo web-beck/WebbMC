@@ -4925,7 +4925,19 @@ function PanelSettings(root, args = []) {
           <dt>Node.js</dt><dd>${esc(info.node)} (${esc(info.platform)})</dd>
           <dt>Time zone</dt><dd>${esc(info.timezone)}</dd>
         </dl>
-        <p class="faint small" style="margin-top:14px">Change the address or port with the <code>WEBMC_HOST</code> and <code>WEBMC_PORT</code> environment variables, then restart the panel.</p>
+        <p class="faint small" style="margin-top:14px">Change the address or port with <code>WEBMC_HOST</code> and <code>WEBMC_PORT</code> on the <a href="#/settings/env">.env</a> tab, then restart the panel.</p>
+        <div class="row" style="margin-top:14px">
+          <button type="button" class="btn" id="ps-restart" ${info.restarter ? '' : 'disabled'}>${icon('restart')}Restart WebbMC</button>
+          <span class="faint small">${
+            info.restarter === 'pm2'
+              ? 'Stops the servers, and pm2 starts WebbMC again. Servers that were running start again too.'
+              : info.restarter === 'helper'
+                ? 'Stops the servers and starts WebbMC again. Servers that were running start again too.'
+                : info.railway
+                  ? 'On Railway, restart the service from Railway instead.'
+                  : 'Nothing would start WebbMC again here: stop it (Ctrl+C) and run <code>node server.js</code>, or run it with pm2.'
+          }</span>
+        </div>
       </div>`;
     const form = $('#ps-form', root);
     wireRam(form);
@@ -4941,6 +4953,15 @@ function PanelSettings(root, args = []) {
     };
     $('#ps-test', root).onclick = test;
     test();
+    $('#ps-restart', root).onclick = async () => {
+      const running = (state.overview?.servers || []).filter((x) => x.pid).length;
+      const ok = await confirmBox(
+        'Restart WebbMC?',
+        `WebbMC stops ${running ? `the ${running} running server${running === 1 ? '' : 's'} (players are disconnected)` : 'every server'} and restarts. Servers that were running start again afterwards. This page reloads when it is back.`,
+        { danger: true, confirmText: 'Restart now' },
+      );
+      if (ok) await restartPanel('Restarting WebbMC', () => api('POST', '/api/restart'), true, 'WebbMC is restarting');
+    };
     form.onsubmit = async (e) => {
       e.preventDefault();
       const f = form.elements;
