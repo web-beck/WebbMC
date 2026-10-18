@@ -4768,12 +4768,32 @@ async function renderUpdates(card, check = false) {
       ${u.dirty ? notice('This folder has local edits to the panel. The update works when they do not touch the same files; otherwise git refuses and nothing changes.', 'warn') : ''}
       ${u.canApply ? `<div><button class="btn btn-accent" data-update-now>${icon('download')}Stop servers and update</button></div>` : ''}`;
   } else body = `<p class="muted" style="margin:0">${icon('shield').replace('<svg', '<svg style="width:16px;height:16px;vertical-align:-3px;color:var(--accent)"')} WebbMC is up to date.</p>`;
+  // How soon a push shows up, and the optional GitHub webhook that makes it instant.
+  let speed = '';
+  if (u.webhook?.configured) {
+    speed = `<p class="faint small" style="margin:0">${icon('bolt').replace('<svg', '<svg style="width:14px;height:14px;vertical-align:-2px;color:var(--accent)"')} Instant: GitHub tells WebbMC about every push${
+      u.webhook.lastAt ? ` (last message ${fmtAgo(u.webhook.lastAt)})` : '. No message from GitHub yet: check the webhook in the repository settings.'
+    }</p>`;
+  } else if (u.webhook) {
+    const hook = `${location.origin}/api/update/webhook`;
+    const secret = [...crypto.getRandomValues(new Uint8Array(20))].map((b) => b.toString(16).padStart(2, '0')).join('');
+    const local = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
+    const copyable = (v) => `<span class="addr">${esc(v)}<button type="button" data-copy="${esc(v)}" title="Copy">${icon('copy')}</button></span>`;
+    speed = `<details class="raw"><summary class="faint small">While the panel is open, pushes show up within a minute. Make it instant (optional)</summary>
+      <ol class="small muted stack-sm" style="margin:10px 0 0;padding-left:18px">
+        <li>On the <a href="#/settings/env">.env</a> tab, set <span class="mono">WEBMC_WEBHOOK_SECRET</span> to a long random value, for example ${copyable(secret)}, then restart WebbMC.</li>
+        <li>On GitHub, open the repository's <strong>Settings → Webhooks → Add webhook</strong>. Payload URL ${copyable(hook)}, content type <span class="mono">application/json</span>, the same secret, and <em>Just the push event</em>.</li>
+      </ol>
+      ${local ? notice('GitHub has to reach that address from the internet. Open this page through your public domain to get the right Payload URL.', 'warn') : ''}
+    </details>`;
+  }
   card.innerHTML = `
     <div class="row"><h2>Updates</h2><span class="spacer"></span>${
       u.mode !== 'none' ? `<button class="btn btn-sm" data-act="check">${icon('restart')}Check now</button>` : ''
     }</div>
     <dl class="kv"><dt>Running</dt><dd>${cur}</dd>${branchRow}${u.checkedAt ? `<dt>Last checked</dt><dd>${fmtAgo(u.checkedAt)}</dd>` : ''}</dl>
-    ${body}`;
+    ${body}
+    ${speed}`;
   const pick = $('#upd-branch', card);
   if (pick) {
     const go = $('[data-act="switch"]', card);

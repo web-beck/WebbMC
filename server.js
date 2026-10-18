@@ -125,6 +125,7 @@ const visibleIds = (user) => new Set(visibleServers(user).map((s) => s.id));
 // Panel overview, polled by the UI every few seconds.
 route('GET', '/api/overview', ({ user }) => {
   const servers = visibleServers(user);
+  if (user.admin) updates.watched(); // look for panel updates often while an admin has the panel open
   return {
     panel: { name: store.state.settings.panelName, version: VERSION, build: BUILD },
     host: manager.hostStats(),
@@ -527,6 +528,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (url.pathname.startsWith('/auth/') && (await auth.handle(req, res, url, clientIp))) return;
+    // GitHub's push webhook: no sign-in, it is signed with WEBMC_WEBHOOK_SECRET instead (404 when that is not set).
+    if (url.pathname === '/api/update/webhook' && req.method === 'POST') return sendJson(res, 200, await updates.webhook(req));
     const user = auth.currentUser(req);
     if (!user && !url.pathname.startsWith('/static/')) {
       if (url.pathname.startsWith('/api/')) throw httpError(401, 'Sign in first');
