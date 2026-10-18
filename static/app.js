@@ -1571,7 +1571,7 @@ const addonLabel = (s) =>
   s.type === 'fabric' ? 'Mods' : s.type === 'vanilla' ? 'Datapacks' : ['custom', 'import'].includes(s.type) ? 'Add-ons' : 'Plugins';
 const LOADER_NAME = { paper: 'Paper', purpur: 'Purpur', fabric: 'Fabric', velocity: 'Velocity', bungeecord: 'BungeeCord' };
 
-const SOURCE_LABEL = { modrinth: 'Modrinth', hangar: 'Hangar', essentialsx: 'EssentialsX', github: 'GitHub', link: 'Link' };
+const SOURCE_LABEL = { modrinth: 'Modrinth', hangar: 'Hangar', essentialsx: 'EssentialsX', geysermc: 'GeyserMC', github: 'GitHub', link: 'Link' };
 const fmtCount = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${+(n / 1e3).toFixed(1)}k` : String(n || 0));
 
 function AddonsTab(el, ctx) {
@@ -1728,7 +1728,7 @@ function AddonsTab(el, ctx) {
     sub(
       `Everything installed in <span class="mono">${esc(info.dir)}</span>${info.datapacks.length && info.kind !== 'datapacks' ? ' and the world\'s datapacks' : ''}, checked for newer builds for <strong>${esc(
         target(),
-      )}</strong>. Files you added yourself are recognised when they are on Modrinth.`,
+      )}</strong>. Files you added yourself are recognised when they are on Modrinth, and Geyser, Floodgate and MCXboxBroadcast by GeyserMC's own builds.`,
     );
     pane(`
       <div class="row" style="margin-bottom:12px"><span class="faint small" id="up-when"></span><span class="spacer"></span><span id="up-all"></span>
@@ -1778,6 +1778,7 @@ function AddonsTab(el, ctx) {
   /** Update one item from the last check. Resolves when done. */
   function runUpdate(u, btn, refresh = true) {
     if (u.action?.essentialsx !== undefined) return install({ modules: [u.action.essentialsx], channel: u.action.channel }, btn, 'essentialsx', { refresh });
+    if (u.action?.geysermc) return install({ projects: [u.action.geysermc] }, btn, 'geysermc', { refresh });
     return install({ url: u.action.url, replace: u.path }, btn, 'install', { refresh });
   }
 
@@ -1902,6 +1903,54 @@ function AddonsTab(el, ctx) {
       .join('')}</tbody></table>`;
   }
 
+  // ---- GeyserMC: Geyser, Floodgate and MCXboxBroadcast, from GeyserMC's own downloads
+  const GEYSER_PLATFORM = { spigot: 'Paper and Spigot', velocity: 'Velocity', bungeecord: 'BungeeCord', fabric: 'Fabric', neoforge: 'NeoForge' };
+  async function geyserPane() {
+    sub(
+      `<a href="https://geysermc.org" target="_blank" rel="noopener">GeyserMC</a> lets Bedrock Edition players (phones, consoles, Windows) join. Geyser and Floodgate come from geysermc.org's own downloads, MCXboxBroadcast from its GitHub releases, and every file is checked against its published checksum. Updating replaces the old jar.`,
+    );
+    pane(`
+      <div class="row" style="margin-bottom:12px"><span class="faint small" id="gm-plat"></span><span class="spacer"></span><span id="gm-all"></span></div>
+      <div class="card table-wrap" id="gm-list"><p class="muted row" style="padding:14px"><span class="spin"></span>Loading GeyserMC builds...</p></div>`);
+    const seq = ++searchSeq;
+    let d;
+    try {
+      d = await api('GET', `/api/servers/${ctx.id}/addons/geysermc`);
+    } catch (err) {
+      if (seq === searchSeq) $('#gm-list', el).innerHTML = `<p class="muted" style="padding:14px">${esc(err.message)}</p>`;
+      return;
+    }
+    if (seq !== searchSeq) return;
+    $('#gm-plat', el).textContent = `Builds for ${GEYSER_PLATFORM[d.platform] || d.platform}`;
+    const outdated = d.projects.filter((p) => p.installed && p.available && !p.upToDate);
+    $('#gm-all', el).innerHTML = outdated.length
+      ? `<button class="btn btn-sm btn-accent" data-geyser="${esc(outdated.map((p) => p.id).join(','))}">${icon('restart')}Update all (${outdated.length})</button>`
+      : d.projects.some((p) => p.installed)
+        ? '<span class="pill ok"><span class="dot ok"></span>Up to date</span>'
+        : `<button class="btn btn-sm btn-accent" data-geyser="geyser,floodgate">${icon('download')}Install Geyser and Floodgate</button>`;
+    $('#gm-list', el).innerHTML = `<table class="table"><tbody>${d.projects
+      .map((p) => {
+        const have = p.installed;
+        const state = !have
+          ? ''
+          : `<span class="tag ${p.upToDate ? '' : 'warn'}">${p.upToDate ? 'Up to date' : `Installed ${esc(have.build || 'an older build')}`}</span>${have.enabled ? '' : '<span class="tag">disabled</span>'}`;
+        const btn = !p.available
+          ? `<span class="faint small">${esc(p.error || 'No build for this kind of server')}</span>`
+          : have
+            ? `<button class="btn btn-sm ${p.upToDate ? '' : 'btn-accent'}" data-geyser="${esc(p.id)}" title="${
+                p.upToDate ? 'Already the latest. Downloads it again.' : `Update to ${esc(p.latest.label)}`
+              }">${icon('restart')}Update</button>`
+            : `<button class="btn btn-sm" data-geyser="${esc(p.id)}">${icon('download')}Install</button>`;
+        const ico = p.icon ? `<img class="addon-ico" src="${esc(p.icon)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : `<span class="addon-ico empty">${icon('puzzle')}</span>`;
+        return `<tr><td><div class="row" style="gap:12px;flex-wrap:nowrap;align-items:flex-start">${ico}<div style="min-width:0">
+            <div class="row" style="gap:8px"><a href="${esc(p.page)}" target="_blank" rel="noopener"><strong>${esc(p.name)}</strong></a>${state}</div>
+            <div class="faint small">${esc(p.desc)}${p.requires && !have ? ' Installs Geyser too when it is missing.' : ''}</div>
+            ${p.latest ? `<div class="faint small">Latest: <span class="mono">${esc(p.latest.label)}</span>${p.latest.published ? ` · ${fmtDate(p.latest.published)}` : ''}</div>` : ''}
+          </div></div></td><td class="actions">${btn}</td></tr>`;
+      })
+      .join('')}</tbody></table>`;
+  }
+
   // ---- GitHub: latest release of a repository
   const assetRows = (repoUrl, assets, suggested, installed) =>
     `<ul class="asset-list">${assets
@@ -1972,12 +2021,13 @@ function AddonsTab(el, ctx) {
     };
   }
 
-  const PANES = { installed: () => installedPane(), modrinth: searchPane, hangar: searchPane, essentialsx: essxPane, github: githubPane, link: linkPane };
+  const PANES = { installed: () => installedPane(), modrinth: searchPane, hangar: searchPane, essentialsx: essxPane, geysermc: geyserPane, github: githubPane, link: linkPane };
   const REFRESH = {
     installed: () => installedPane(),
     modrinth: () => runSearch($('#a-search', el)?.elements.q.value.trim() || ''),
     hangar: () => runSearch($('#a-search', el)?.elements.q.value.trim() || ''),
     essentialsx: essxPane,
+    geysermc: geyserPane,
     github: () => lookup(pref.get('ghRepo', '')),
     link: () => {},
   };
@@ -2067,6 +2117,8 @@ function AddonsTab(el, ctx) {
     if (ins) return install({ url: ins.dataset.install }, ins);
     const ex = e.target.closest('[data-essx]');
     if (ex) return install({ modules: ex.dataset.essx.split(','), channel: pref.get('essxChannel', 'stable') }, ex, 'essentialsx');
+    const gm = e.target.closest('[data-geyser]');
+    if (gm) return install({ projects: gm.dataset.geyser.split(',') }, gm, 'geysermc');
     const gh = e.target.closest('[data-gh-asset]');
     if (gh) return install({ url: gh.dataset.ghUrl, asset: gh.dataset.ghAsset }, gh);
     const d = e.target.closest('[data-del]');

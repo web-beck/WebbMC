@@ -291,6 +291,8 @@ route('GET', '/api/servers/:id/addons/search', ({ inst, query }) => addons.searc
 route('GET', '/api/servers/:id/addons/github', ({ inst, query }) => addons.githubRelease(inst, query.get('repo')));
 route('GET', '/api/servers/:id/addons/essentialsx', ({ inst, query }) => addons.essentialsInfo(inst, query.get('channel')));
 route('POST', '/api/servers/:id/addons/essentialsx', async ({ inst, body }) => logInstalled(inst, await addons.essentialsInstall(inst, body.modules, body.channel)));
+route('GET', '/api/servers/:id/addons/geysermc', ({ inst }) => addons.geyserInfo(inst));
+route('POST', '/api/servers/:id/addons/geysermc', async ({ inst, body }) => logInstalled(inst, await addons.geyserInstall(inst, body.projects)));
 route('POST', '/api/servers/:id/addons/install', async ({ inst, body }) => logInstalled(inst, await addons.install(inst, body.url, body.asset, body.version, body.replace)));
 route('GET', '/api/servers/:id/addons/updates', ({ inst, query }) => addons.checkUpdates(inst, query.get('version'), query.get('force') === '1'));
 route('POST', '/api/servers/:id/addons/toggle', ({ inst, body }) => addons.toggle(inst, body.path));

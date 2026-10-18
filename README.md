@@ -32,6 +32,7 @@ Java does not need to be installed. Each server uses the Java its Minecraft vers
 - **Plugins, mods and datapacks** from several sources, each filtered to the server's software and Minecraft version:
   - **Modrinth** and **Hangar** (PaperMC's plugin site): search in the panel or paste a project link. WebbMC picks the newest matching build, checks it against the site's checksum, and installs required dependencies (for example Fabric API, or ViaVersion for ViaBackwards).
   - **EssentialsX**: every module of the latest stable release or dev build, the same files as [essentialsx.net/downloads](https://essentialsx.net/downloads). Installed modules show an **Update** button, and **Update all** updates every module that is behind.
+  - **GeyserMC**: Geyser, Floodgate and the MCXboxBroadcast extension, from GeyserMC's own downloads (MCXboxBroadcast from its GitHub releases), in the build for the server's platform (Paper/Spigot, Velocity, BungeeCord, Fabric or NeoForge). Copies you added yourself are recognised by name, including MCXboxBroadcast in Geyser's `extensions` folder, and checked by SHA-256 against the newest build, so the Installed tab says exactly which build you have and offers **Update**. Floodgate and MCXboxBroadcast bring Geyser along when it is missing.
   - **GitHub**: the newest release of any repository. When a release has several jars, WebbMC suggests the one for your server and lets you pick.
   - **Any direct link** to a `.jar`.
 
