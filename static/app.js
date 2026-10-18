@@ -123,6 +123,7 @@ const ICONS = {
     'M4 2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 12h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2zm3-9.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm0 12a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z',
   shield: 'M12 1 3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5zm-2 16-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9z',
   ban: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM4 12a8 8 0 0 1 12.9-6.32L5.68 16.9A7.93 7.93 0 0 1 4 12zm8 8a7.93 7.93 0 0 1-4.9-1.68L18.32 7.1A8 8 0 0 1 12 20z',
+  grip: 'M9 4.4a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2zM15 4.4a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2zM9 10.4a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2zM15 10.4a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2zM9 16.4a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2zM15 16.4a1.6 1.6 0 1 0 0 3.2a1.6 1.6 0 1 0 0-3.2z',
   logout: 'M10.09 15.59 11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67zM19 3H5a2 2 0 0 0-2 2v4h2V5h14v14H5v-4H3v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z',
 };
 const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="${ICONS[name]}"/></svg>`;
@@ -259,7 +260,17 @@ const findServer = (id) => state.overview?.servers.find((s) => s.id === id);
 const me = () => state.overview?.me || { admin: false, id: null };
 /** Servers that belong to you or were shared with you. Servers without an owner belong to the admins. */
 const isMine = (s) => s.owner === me().id || (!s.owner && me().admin) || Boolean(me().id && s.shared?.includes(me().id));
-const myServers = () => (state.overview?.servers || []).filter(isMine);
+/** Your servers, in the order you arranged them in the sidebar (servers you have not placed go at the end). */
+const myServers = () => {
+  const list = (state.overview?.servers || []).filter(isMine);
+  // A move just made wins for a few seconds, so a refresh that was already on its way does not undo it.
+  const order = state.serverOrder && Date.now() - state.serverOrder.at < 8000 ? state.serverOrder.ids : me().serverOrder || [];
+  const at = new Map(order.map((id, i) => [id, i]));
+  return list
+    .map((s, i) => ({ s, k: at.has(s.id) ? at.get(s.id) : order.length + i }))
+    .sort((a, b) => a.k - b.k)
+    .map((x) => x.s);
+};
 /** Who a server belongs to: on servers shared with you, and for admins on servers that are not theirs. */
 const ownerChip = (s) =>
   s.access === 'shared'
@@ -382,17 +393,27 @@ function renderChrome() {
   $$('.brand-name').forEach((el) => (el.innerHTML = nameHtml));
   document.title = `${panel.name} Server Panel`;
 
-  $('#server-nav').innerHTML = servers.length
+  const navHtml = servers.length
     ? servers
         .map(
           (s) => `
-      <a href="#/server/${s.id}" data-sid="${s.id}">
+      <a href="#/server/${s.id}" data-sid="${s.id}" draggable="false">
+        ${servers.length > 1 ? `<span class="grip" data-grip tabindex="0" role="button" title="Drag to move" aria-label="Move ${esc(s.name)}: drag, or press the up and down arrow keys">${icon('grip')}</span>` : ''}
         <span class="nm"><span class="dot ${statusInfo(s).cls}"></span><span>${esc(s.name)}</span></span>
         <span class="faint small">${s.pid ? `${s.playerCount}/${s.maxPlayers}` : ''}</span>
       </a>`,
         )
         .join('')
     : `<div class="empty">${me().admin && state.overview.servers.length ? 'None of your own. See All servers.' : 'No servers yet'}</div>`;
+  // Rebuild only when something changed, and never in the middle of a drag; keep the keyboard focus where it was.
+  if (!reorder.active && navHtml !== serverNavHtml) {
+    const nav = $('#server-nav');
+    const focusSid = document.activeElement?.closest?.('#server-nav [data-sid]')?.dataset.sid;
+    const onGrip = Boolean(document.activeElement?.closest?.('#server-nav [data-grip]'));
+    nav.innerHTML = navHtml;
+    serverNavHtml = navHtml;
+    if (focusSid) $(`#server-nav [data-sid="${focusSid}"]${onGrip ? ' [data-grip]' : ''}`)?.focus();
+  }
 
   const u = me();
   $('[data-nav="settings"]').classList.toggle('hidden', !u.admin);
@@ -401,6 +422,7 @@ function renderChrome() {
   renderNotifCount();
   $('#pending-badge').textContent = u.pending || '';
   $('#pending-badge').classList.toggle('hidden', !u.pending);
+  $('#nav-toggle').classList.toggle('pending', Boolean(u.pending)); // a dot on the folded menu
   $('#side-foot').innerHTML = `
     <div class="me-row">
       <a class="me-link" href="#/account" title="Your account">${mePic(u)}
@@ -422,6 +444,9 @@ function highlightNav() {
   const other = top === 'server' && findServer(parts[1]) && !isMine(findServer(parts[1]));
   $$('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.nav === (other ? 'all' : top)));
   $$('#server-nav a').forEach((a) => a.classList.toggle('active', top === 'server' && a.dataset.sid === parts[1]));
+  // The folded menu says which page you are on.
+  const active = $('.nav a.active');
+  $('#nav-current').textContent = active ? [...active.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim() : '';
 }
 
 const sidebar = $('#sidebar');
@@ -435,6 +460,88 @@ $('#menu-btn').onclick = () => {
   scrim.classList.add('open');
 };
 scrim.onclick = closeMenu;
+
+// The menu (Dashboard to Panel settings) folds away under its label, remembered in this browser.
+function setNavCollapsed(collapsed) {
+  sidebar.classList.toggle('nav-collapsed', collapsed);
+  $('#nav-toggle').setAttribute('aria-expanded', String(!collapsed));
+  $('#main-nav').inert = collapsed; // folded links are out of the tab order too
+  pref.set('navCollapsed', collapsed);
+}
+$('#nav-toggle').onclick = () => setNavCollapsed(!sidebar.classList.contains('nav-collapsed'));
+setNavCollapsed(pref.get('navCollapsed', false));
+
+// ---------------------------------------------------------------- arranging your servers in the sidebar
+// Drag a server by its handle (mouse or touch), or focus the handle and press Up/Down. The order is saved on your
+// account, so every device shows it, and the dashboard lists your servers in the same order.
+let serverNavHtml = '';
+const reorder = { active: false };
+const navIds = () => $$('#server-nav [data-sid]').map((a) => a.dataset.sid);
+
+function saveServerOrder(ids) {
+  state.serverOrder = { ids, at: Date.now() };
+  renderChrome();
+  current?.update?.();
+  api('PUT', '/api/account/server-order', { order: ids })
+    .then((r) => {
+      if (state.overview?.me) state.overview.me.serverOrder = r.serverOrder;
+    })
+    .catch((err) => toast(`Could not save the order: ${err.message}`, 'bad'));
+}
+
+const serverNav = $('#server-nav');
+serverNav.addEventListener('click', (e) => {
+  if (e.target.closest('[data-grip]')) e.preventDefault(); // the handle moves the server; it does not open it
+});
+serverNav.addEventListener('pointerdown', (e) => {
+  const grip = e.target.closest('[data-grip]');
+  if (!grip || e.button !== 0) return;
+  e.preventDefault();
+  const item = grip.closest('[data-sid]');
+  const before = navIds().join();
+  reorder.active = true;
+  item.classList.add('dragging');
+  serverNav.classList.add('reordering');
+  document.body.classList.add('dragging-server');
+  const mid = (el) => {
+    const r = el.getBoundingClientRect();
+    return r.top + r.height / 2;
+  };
+  // Move the neighbours rather than the dragged item, so the browser never loses track of the pointer.
+  const move = (ev) => {
+    const sb = sidebar.getBoundingClientRect();
+    if (ev.clientY < sb.top + 40) sidebar.scrollTop -= 12;
+    else if (ev.clientY > sb.bottom - 40) sidebar.scrollTop += 12;
+    let sib;
+    while ((sib = item.previousElementSibling) && ev.clientY < mid(sib)) serverNav.insertBefore(sib, item.nextElementSibling);
+    while ((sib = item.nextElementSibling) && ev.clientY > mid(sib)) serverNav.insertBefore(sib, item);
+  };
+  const end = () => {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', end);
+    document.removeEventListener('pointercancel', end);
+    item.classList.remove('dragging');
+    serverNav.classList.remove('reordering');
+    document.body.classList.remove('dragging-server');
+    reorder.active = false;
+    if (navIds().join() !== before) saveServerOrder(navIds());
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', end);
+  document.addEventListener('pointercancel', end);
+});
+serverNav.addEventListener('keydown', (e) => {
+  const grip = e.target.closest('[data-grip]');
+  if (!grip || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  e.preventDefault();
+  const item = grip.closest('[data-sid]');
+  const up = e.key === 'ArrowUp';
+  const sib = up ? item.previousElementSibling : item.nextElementSibling;
+  if (!sib) return;
+  // Move the neighbour past it, so the handle keeps the keyboard focus.
+  serverNav.insertBefore(sib, up ? item.nextElementSibling : item);
+  saveServerOrder(navIds());
+});
 
 // ================================================================ notifications (the bell, top right)
 

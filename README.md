@@ -50,6 +50,7 @@ Java does not need to be installed. Each server uses the Java its Minecraft vers
 - **Schedules**: run commands, restart, start, stop or back up on an interval or at a time of day.
 - **Change version or software** of an existing server in place.
 - **Activity log** of everything the panel does.
+- **Your sidebar, your way**: fold the menu (Dashboard to Panel settings) under its label to make room, and drag your servers into any order by the handle that appears on hover (or focus it and press Up/Down). The order is saved on your account, so it follows you to other devices, and the dashboard uses it too.
 - **.env editor** (admins, Panel settings → .env): edit the panel's settings file as fields or as text, then restart from the page to apply them.
 - **Sharing**: a server's owner can share it with other accounts in the server's **Settings** tab. People it is shared with can run and change it like the owner, but cannot delete it or change who it is shared with. Shared servers show a "Shared by" badge.
 - **Notification center** (the bell in the top right): crashes and failures on the servers you can see, and servers shared with you. Admins also see panel updates and accounts waiting for approval.

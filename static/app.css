@@ -103,8 +103,31 @@ svg { width: 18px; height: 18px; fill: currentColor; flex: none; }
   color: var(--fg); box-shadow: inset 2px 0 0 var(--accent);
 }
 .side-label { margin: 18px 12px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); }
+/* The menu (Dashboard to Panel settings) folds away under its label; the choice is remembered in this browser. */
+.side-toggle { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 8px; margin: 0 0 4px; padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); transition: color 0.15s, background 0.15s; }
+.side-toggle:hover { color: var(--muted); background: var(--surface-2); }
+.side-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.side-toggle .chev { width: 16px; height: 16px; margin-left: auto; flex: none; transition: transform 0.2s; }
+.side-current { display: none; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12px; color: var(--muted); }
+.sidebar.nav-collapsed .side-toggle.pending::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); flex: none; order: 2; }
+.collapse { display: grid; grid-template-rows: 1fr; transition: grid-template-rows 0.22s ease; }
+.collapse > .nav { overflow: hidden; min-height: 0; }
+.sidebar.nav-collapsed .collapse { grid-template-rows: 0fr; }
+.sidebar.nav-collapsed .side-toggle .chev { transform: rotate(-90deg); }
+.sidebar.nav-collapsed .side-current { display: block; }
+.sidebar.nav-collapsed #servers-label { margin-top: 10px; }
+@media (prefers-reduced-motion: reduce) { .collapse, .side-toggle .chev { transition: none; } }
 .server-nav { display: flex; flex-direction: column; gap: 2px; }
-.server-nav a { justify-content: space-between; }
+.server-nav a { justify-content: space-between; position: relative; }
+/* Drag handle in the sidebar's left margin, so names do not move. Shown on hover or focus; always on touch screens. */
+.server-nav .grip { position: absolute; left: -13px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 15px; height: 26px; border-radius: 5px; color: var(--faint); cursor: grab; opacity: 0; touch-action: none; transition: opacity 0.15s, color 0.15s; }
+.server-nav .grip svg { width: 14px; height: 14px; }
+.server-nav a:hover .grip, .server-nav .grip:focus-visible, .server-nav.reordering .grip { opacity: 1; }
+.server-nav .grip:hover { color: var(--fg); }
+.server-nav .grip:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+@media (hover: none) { .server-nav .grip { opacity: 0.6; } }
+.server-nav a.dragging { background: var(--surface-2); color: var(--fg); box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45), inset 0 0 0 1px var(--line-strong); z-index: 2; }
+body.dragging-server, body.dragging-server * { cursor: grabbing !important; user-select: none; }
 .server-nav .nm { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .server-nav .nm span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .server-nav .empty { padding: 6px 12px; color: var(--faint); font-size: 13px; }

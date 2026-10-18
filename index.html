@@ -25,7 +25,12 @@
           <span class="brand-name" id="brand-name">Webb<span class="text-gradient">MC</span></span>
         </a>
 
-        <nav class="nav">
+        <button type="button" class="side-label side-toggle" id="nav-toggle" aria-expanded="true" aria-controls="main-nav" title="Show or hide the menu">
+          <span>Menu</span><span class="side-current" id="nav-current"></span>
+          <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="collapse" id="main-nav-wrap">
+        <nav class="nav" id="main-nav">
           <a href="#/" data-nav="dashboard"><svg viewBox="0 0 24 24"><path d="M3 13h8V3H3zm0 8h8v-6H3zm10 0h8V11h-8zm0-18v6h8V3z"/></svg>Dashboard</a>
           <a href="#/all" data-nav="all" class="hidden"><svg viewBox="0 0 24 24"><path d="M4 2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 12h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2zm3-9.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm0 12a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z" fill-rule="evenodd"/></svg>All servers</a>
           <a href="#/new" data-nav="new"><svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>New server</a>
@@ -35,8 +40,9 @@
           <a href="#/account" data-nav="account"><svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Account</a>
           <a href="#/settings" data-nav="settings"><svg viewBox="0 0 24 24"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.4-2.5 1a7 7 0 0 0-1.7-1L15 3h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.5-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.4 2.5-1a7 7 0 0 0 1.7 1L11 21h4l.4-2.6a7 7 0 0 0 1.7-1l2.5 1 2-3.4zM13 15.5A3.5 3.5 0 1 1 13 8.5a3.5 3.5 0 0 1 0 7z"/></svg>Panel settings<span class="nav-badge hidden" id="pending-badge" title="Accounts waiting for approval"></span></a>
         </nav>
+        </div>
 
-        <div class="side-label">Your servers</div>
+        <div class="side-label" id="servers-label" title="Drag the handle next to a server to move it">Your servers</div>
         <div class="server-nav" id="server-nav"></div>
 
         <div class="side-foot" id="side-foot"></div>
