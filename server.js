@@ -42,6 +42,19 @@ const { httpError, readJson, readBody, sendJson, int } = require('./lib/util');
 
 const VERSION = require('./package.json').version;
 const BOOT_ID = require('crypto').randomBytes(6).toString('hex');
+// A fingerprint of the page's own files. Open pages compare it with the one they loaded with, and offer a reload
+// when the panel restarted with a new version (otherwise they would keep running the old page code).
+const BUILD = (() => {
+  const hash = require('crypto').createHash('sha1');
+  for (const f of ['index.html', 'static/app.js', 'static/app.css']) {
+    try {
+      hash.update(fs.readFileSync(path.join(__dirname, f)));
+    } catch {
+      /* missing file: the page itself will say so */
+    }
+  }
+  return hash.digest('hex').slice(0, 12);
+})();
 const ON_RAILWAY = Boolean(process.env.RAILWAY_PROJECT_ID || process.env.RAILWAY_ENVIRONMENT_ID);
 const DEFAULT_HOST = ON_RAILWAY ? '0.0.0.0' : '127.0.0.1';
 // WEBMC_HOST is the address to listen on (0.0.0.0, 127.0.0.1, ::), not the public URL. A URL here is a
@@ -113,7 +126,7 @@ const visibleIds = (user) => new Set(visibleServers(user).map((s) => s.id));
 route('GET', '/api/overview', ({ user }) => {
   const servers = visibleServers(user);
   return {
-    panel: { name: store.state.settings.panelName, version: VERSION },
+    panel: { name: store.state.settings.panelName, version: VERSION, build: BUILD },
     host: manager.hostStats(),
     servers,
     me: {

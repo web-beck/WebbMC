@@ -567,6 +567,8 @@ pre.raw { margin: 12px 0 0; padding: 14px; max-height: 420px; overflow: auto; bo
 .modal p { color: var(--muted); }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { opacity: 0; transform: translateY(12px); } }
+.reload-bar { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 210; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; width: max-content; max-width: calc(100vw - 32px); padding: 10px 12px 10px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--accent); box-shadow: 0 12px 30px rgba(0,0,0,.45); font-size: 13px; animation: rise 0.2s ease; }
+.reload-bar > svg { width: 16px; height: 16px; color: var(--accent); flex: none; }
 .toasts { position: fixed; right: 16px; bottom: 16px; z-index: 200; display: grid; gap: 8px; width: min(380px, calc(100vw - 32px)); }
 .toast { padding: 12px 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line-strong); box-shadow: 0 12px 30px rgba(0,0,0,.4); display: flex; gap: 10px; align-items: flex-start; animation: rise 0.2s ease; font-size: 13px; }
 .toast.ok { border-left: 3px solid var(--accent); }

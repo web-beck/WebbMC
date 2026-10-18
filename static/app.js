@@ -1555,9 +1555,9 @@ function AddonsTab(el, ctx) {
         : '';
   }
 
-  async function loadList() {
+  async function loadList(fetched = null) {
     try {
-      info = await api('GET', `/api/servers/${ctx.id}/addons`);
+      info = fetched || (await api('GET', `/api/servers/${ctx.id}/addons`));
     } catch (err) {
       return toast(err.message, 'bad');
     }
@@ -1993,7 +1993,32 @@ function AddonsTab(el, ctx) {
       runSearch(q.trim());
     }
   };
-  return { update: restartHint, destroy: () => clearTimeout(searchTimer) };
+  // Plugins added or removed outside this page (Files tab, SSH, another admin) show up without a reload. Only the
+  // local folder is read; the update check against Modrinth and the others runs again only when files changed.
+  let relooking = false;
+  const relook = async () => {
+    if (relooking || document.hidden || !info || $('.modal-backdrop')) return;
+    relooking = true;
+    try {
+      const next = await api('GET', `/api/servers/${ctx.id}/addons`);
+      const files = (d) => JSON.stringify([d.addons, d.datapacks]);
+      if (files(next) === files(info)) return;
+      await loadList(next);
+      if (source === 'installed') installedPane();
+    } catch {
+      /* try again next time */
+    } finally {
+      relooking = false;
+    }
+  };
+  const timer = setInterval(relook, 8000);
+  return {
+    update: restartHint,
+    destroy: () => {
+      clearTimeout(searchTimer);
+      clearInterval(timer);
+    },
+  };
 }
 
 // ---------------------------------------------------------------- files tab
@@ -2284,7 +2309,29 @@ function FilesTab(el, ctx) {
   });
 
   load();
-  return {};
+  // The folder changes while you look at it (the server writes logs and worlds, files are copied in over SSH or
+  // uploaded by someone else), so look again every few seconds. Not while a file is open, a dialog is up, or
+  // files are being dragged in; and only redraw when something changed.
+  let looking = false;
+  const relook = async () => {
+    if (editor || looking || document.hidden || $('.modal-backdrop') || !$('#f-card', main) || $('#f-card.dragging', main)) return;
+    looking = true;
+    const at = cwd;
+    try {
+      const next = await api('GET', `/api/servers/${ctx.id}/files?path=${enc(at)}`);
+      if (editor || at !== cwd || $('.modal-backdrop') || JSON.stringify(next) === JSON.stringify(entries)) return;
+      const y = scrollY;
+      entries = next;
+      renderList();
+      scrollTo(0, y);
+    } catch {
+      /* the next try, or the Refresh button, will tell */
+    } finally {
+      looking = false;
+    }
+  };
+  const timer = setInterval(relook, 4000);
+  return { destroy: () => clearInterval(timer) };
 }
 
 // ---------------------------------------------------------------- properties tab: server list look + server.properties
@@ -4296,6 +4343,9 @@ function showOtp(login, otp, intro) {
 }
 
 /** Admin: every account, who may sign in, admins, and one-time passwords for people who forgot theirs. */
+/** What the Accounts card shows, minus "last seen" (which changes all the time), to tell when to redraw it. */
+const usersSig = (users) => JSON.stringify(users.map(({ lastSeen, ...u }) => u));
+
 async function renderUsers(card, settings, info) {
   let users;
   try {
@@ -4304,6 +4354,7 @@ async function renderUsers(card, settings, info) {
     card.innerHTML = `<h2>Accounts</h2><p class="muted">${esc(err.message)}</p>`;
     return;
   }
+  card.dataset.sig = usersSig(users);
   const pending = users.filter((u) => u.status === 'pending' && !u.admin && !u.placeholder).length;
   const kind = (u) =>
     u.placeholder
@@ -4878,6 +4929,7 @@ function renderEnv(box) {
 
 function PanelSettings(root, args = []) {
   let stopPlayit = null;
+  let usersTimer = null;
   if (!me().admin) {
     root.innerHTML = `<div class="card empty-state"><h2>Admins only</h2><p class="muted">Panel settings are managed by the panel admin.</p><a class="btn" href="#/">Back to dashboard</a></div>`;
     return {};
@@ -4943,6 +4995,16 @@ function PanelSettings(root, args = []) {
     wireRam(form);
     fillJavaList();
     renderUsers($('#ps-users', root), s, info);
+    // New sign-ups, and changes made by another admin, show up without a reload (not while you type in the card).
+    const usersCard = $('#ps-users', root);
+    usersTimer = setInterval(async () => {
+      if (document.hidden || $('.modal-backdrop') || usersCard.contains(document.activeElement) || $('#ps-add-id', usersCard)?.value) return;
+      try {
+        if (usersSig(await api('GET', '/api/users')) !== usersCard.dataset.sig) renderUsers(usersCard, (await api('GET', '/api/settings')).settings, info);
+      } catch {
+        /* try again next time */
+      }
+    }, 8000);
     stopPlayit = renderPlayit($('#ps-playit', root));
     renderUpdates($('#ps-updates', root)).then(() => {
       if (args[0] === 'updates') $('#ps-updates', root).scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -4981,7 +5043,12 @@ function PanelSettings(root, args = []) {
       }
     };
   });
-  return { destroy: () => stopPlayit?.() };
+  return {
+    destroy: () => {
+      stopPlayit?.();
+      clearInterval(usersTimer);
+    },
+  };
 }
 
 // ================================================================ router + boot
@@ -5016,10 +5083,24 @@ function route() {
   highlightNav();
 }
 
+/** The panel restarted with a new version: this page still runs the old code, so offer to load the new one. */
+function offerReload() {
+  if ($('#reload-bar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'reload-bar';
+  bar.className = 'reload-bar';
+  bar.setAttribute('role', 'status');
+  bar.innerHTML = `${icon('info')}<span><strong>WebbMC was updated.</strong> Reload to use the new version.</span><button type="button" class="btn btn-sm btn-accent">${icon('restart')}Reload</button>`;
+  $('button', bar).onclick = () => location.reload();
+  document.body.append(bar);
+}
+
 async function poll() {
   if (document.hidden && state.overview) return;
   try {
     state.overview = await api('GET', '/api/overview');
+    state.build ||= state.overview.panel.build;
+    if (state.overview.panel.build && state.overview.panel.build !== state.build) offerReload();
     if (!state.connected) {
       state.connected = true;
       toast('Reconnected to the panel', 'ok');
