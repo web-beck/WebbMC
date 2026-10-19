@@ -122,6 +122,25 @@ const visibleServers = (user) =>
     .map((s) => ({ ...s, access: accessOf(user, s) }));
 const visibleIds = (user) => new Set(visibleServers(user).map((s) => s.id));
 
+// Live updates: 'change' whenever the panel state is saved, so open pages refresh at once. It carries no data; each
+// page fetches again with its own account's rights.
+route(
+  'GET',
+  '/api/events',
+  ({ req, res }) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    res.write(': connected\n\n');
+    const onChange = () => res.write('event: change\ndata: {}\n\n');
+    store.changes.on('change', onChange);
+    const keepAlive = setInterval(() => res.write(': ping\n\n'), 20000);
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      store.changes.off('change', onChange);
+    });
+  },
+  { stream: true },
+);
+
 // Panel overview, polled by the UI every few seconds.
 route('GET', '/api/overview', ({ user }) => {
   const servers = visibleServers(user);
@@ -460,7 +479,7 @@ route('PUT', '/api/settings', ({ body }) => {
 // Your own account
 route('GET', '/api/account', ({ user }) => auth.accountInfo(user));
 route('PATCH', '/api/account', ({ req, res, user, body }) => auth.updateAccount(req, res, user, body));
-route('PUT', '/api/account/server-order', ({ user, body }) => auth.setServerOrder(user, body.order, body.folders));
+route('PUT', '/api/account/server-order', ({ user, body }) => auth.setServerOrder(user, body.order, body.folders, body.top));
 route('POST', '/api/account/password', ({ req, res, user, body }) => auth.setOwnPassword(req, res, user, body));
 route('POST', '/api/account/google/unlink', ({ user }) => auth.unlinkGoogle(user));
 route('POST', '/api/account/sign-out-everywhere', ({ req, res, user }) => auth.signOutEverywhere(req, res, user));

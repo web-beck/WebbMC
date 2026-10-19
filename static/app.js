@@ -273,6 +273,8 @@ const myServers = () => {
 };
 /** Your sidebar folders ([{ id, name, ids }], top to bottom); a move just made wins for a few seconds, as above. */
 const myFolders = () => (state.serverOrder && Date.now() - state.serverOrder.at < 8000 ? state.serverOrder.folders : me().serverFolders) || [];
+/** The sidebar's top level: server ids and 'f:<folder id>' in the order you put them. */
+const myTop = () => (state.serverOrder && Date.now() - state.serverOrder.at < 8000 ? state.serverOrder.top : me().serverTop) || [];
 /** Who a server belongs to: on servers shared with you, and for admins on servers that are not theirs. */
 const ownerChip = (s) =>
   s.access === 'shared'
@@ -343,6 +345,27 @@ function powerButtons(s, size = '') {
 
 const POWER_MSG = { start: 'Starting server', stop: 'Stopping server', restart: 'Restarting server', kill: 'Process killed' };
 
+/** Start, stop, restart or kill a server (killing asks first). Resolves true when it was done. */
+async function power(id, action) {
+  if (
+    action === 'kill' &&
+    !(await confirmBox('Kill this server?', 'This ends the Java process immediately without saving the world. Only use it if the server is frozen.', {
+      danger: true,
+      confirmText: 'Kill process',
+    }))
+  )
+    return false;
+  try {
+    await api('POST', `/api/servers/${id}/power`, { action });
+    toast(POWER_MSG[action], 'ok');
+    poll();
+    return true;
+  } catch (err) {
+    toast(err.message, 'bad');
+    return false;
+  }
+}
+
 document.addEventListener('click', async (e) => {
   if (e.target.closest('[data-logout]')) {
     try {
@@ -365,25 +388,8 @@ document.addEventListener('click', async (e) => {
   }
   const btn = e.target.closest('[data-power]');
   if (!btn) return;
-  const id = btn.closest('[data-server]')?.dataset.server;
-  const action = btn.dataset.power;
-  if (
-    action === 'kill' &&
-    !(await confirmBox('Kill this server?', 'This ends the Java process immediately without saving the world. Only use it if the server is frozen.', {
-      danger: true,
-      confirmText: 'Kill process',
-    }))
-  )
-    return;
   btn.disabled = true;
-  try {
-    await api('POST', `/api/servers/${id}/power`, { action });
-    toast(POWER_MSG[action], 'ok');
-    poll();
-  } catch (err) {
-    toast(err.message, 'bad');
-    btn.disabled = false;
-  }
+  if (!(await power(btn.closest('[data-server]')?.dataset.server, btn.dataset.power))) btn.disabled = false;
 });
 
 // ================================================================ chrome (sidebar)
@@ -395,46 +401,78 @@ function renderChrome() {
   $$('.brand-name').forEach((el) => (el.innerHTML = nameHtml));
   document.title = `${panel.name} Server Panel`;
 
-  // Servers in no folder first, then each folder's header and its servers (hidden while it is folded). One flat list,
-  // so dragging a server past a folder header moves it into that folder.
+  // One flat list, top to bottom as you arranged it: servers in no folder and folders, mixed. A folder is its header,
+  // its servers (hidden while it is folded) and an end mark; the servers between the two are in it, so dragging a
+  // server past a header or an end mark moves it into or out of that folder.
   const folders = myFolders();
   const folderOf = new Map(folders.flatMap((f) => f.ids.map((id) => [id, f.id])));
   const closed = new Set(pref.get('closedFolders', []));
   const movable = servers.length > 1 || folders.length > 0;
+  const grip = (name) =>
+    movable ? `<span class="grip" data-grip tabindex="0" role="button" title="Drag to move" aria-label="Move ${name}: drag, or press the up and down arrow keys">${icon('grip')}</span>` : '';
   const link = (s, inFolder, hidden) => `
       <a href="#/server/${s.id}" data-sid="${s.id}" draggable="false" class="${inFolder ? 'in-folder' : ''}" ${hidden ? 'hidden' : ''}>
-        ${movable ? `<span class="grip" data-grip tabindex="0" role="button" title="Drag to move, or into a folder" aria-label="Move ${esc(s.name)}: drag, or press the up and down arrow keys">${icon('grip')}</span>` : ''}
+        ${grip(esc(s.name))}
         <span class="nm"><span class="dot ${statusInfo(s).cls}"></span><span>${esc(s.name)}</span></span>
         <span class="faint small">${s.pid ? `${s.playerCount}/${s.maxPlayers}` : ''}</span>
       </a>`;
-  const folderHead = (f, count, open) => `
+  // A folder: the arrow folds it, its name opens its actions (rename, delete...), and the button on the right starts
+  // every server in it, or stops them once any is running.
+  const folderHead = (f, inside, open) => {
+    const on = inside.filter((s) => s.pid).length;
+    const name = esc(f.name);
+    const powerBtn = on
+      ? `<button type="button" class="icon-btn folder-power stop" data-folder-power="stop" title="Stop the ${on} running server${on === 1 ? '' : 's'} in ${name}" aria-label="Stop all servers in ${name}">${icon('stop')}</button>`
+      : `<button type="button" class="icon-btn folder-power" data-folder-power="start" ${inside.length ? '' : 'disabled'} title="${
+          inside.length ? `Start all ${inside.length} server${inside.length === 1 ? '' : 's'} in ${name}` : 'No servers in this folder yet'
+        }" aria-label="Start all servers in ${name}">${icon('play')}</button>`;
+    return `
       <div class="folder-head" data-folder="${esc(f.id)}">
-        <button type="button" class="folder-toggle" data-folder-toggle aria-expanded="${open}" title="${open ? 'Fold' : 'Unfold'} ${esc(f.name)}">
-          <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          ${icon('folder')}<span class="fname">${esc(f.name)}</span><span class="faint small">${count}</span>
+        ${grip(`the folder ${name}`)}
+        <button type="button" class="folder-chev" data-folder-toggle aria-expanded="${open}" title="${open ? 'Fold' : 'Unfold'}" aria-label="${open ? 'Fold' : 'Unfold'} ${name}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
-        <button type="button" class="icon-btn" data-folder-rename title="Rename folder" aria-label="Rename ${esc(f.name)}">${icon('edit')}</button>
-        <button type="button" class="icon-btn danger" data-folder-delete title="Delete folder (its servers stay)" aria-label="Delete ${esc(f.name)}">${icon('trash')}</button>
+        <button type="button" class="folder-toggle" data-folder-menu aria-haspopup="menu" title="Rename, delete, start or stop">${icon('folder')}<span class="fname">${name}</span><span class="faint small">${
+          on ? `${on}/${inside.length} on` : inside.length
+        }</span></button>
+        ${powerBtn}
       </div>`;
+  };
+  const folderBlock = (f) => {
+    const inside = servers.filter((s) => folderOf.get(s.id) === f.id);
+    const open = !closed.has(f.id);
+    return [folderHead(f, inside, open), ...inside.map((s) => link(s, true, !open)), `<div class="folder-end" data-folder-end="${esc(f.id)}" ${open ? '' : 'hidden'}></div>`];
+  };
+  const mine = new Map(servers.map((s) => [s.id, s]));
+  const parts = [];
+  const placed = new Set();
+  // Anything not placed yet (a new server, a folder made a moment ago) goes at the end; before any order was saved,
+  // that is servers in no folder first, then the folders.
+  for (const t of [...myTop(), ...servers.map((s) => s.id), ...folders.map((f) => `f:${f.id}`)]) {
+    if (placed.has(t)) continue;
+    const f = t.startsWith('f:') && folders.find((x) => `f:${x.id}` === t);
+    if (f) parts.push(...folderBlock(f));
+    else if (mine.has(t) && !folderOf.has(t)) parts.push(link(mine.get(t), false, false));
+    else continue;
+    placed.add(t);
+  }
   const navHtml =
     servers.length || folders.length
-      ? [
-          ...servers.filter((s) => !folderOf.has(s.id)).map((s) => link(s, false, false)),
-          ...folders.flatMap((f) => {
-            const inside = servers.filter((s) => folderOf.get(s.id) === f.id);
-            const open = !closed.has(f.id);
-            return [folderHead(f, inside.length, open), ...inside.map((s) => link(s, true, !open))];
-          }),
-        ].join('')
+      ? parts.join('')
       : `<div class="empty">${me().admin && state.overview.servers.length ? 'None of your own. See All servers.' : 'No servers yet'}</div>`;
   // Rebuild only when something changed, and never in the middle of a drag; keep the keyboard focus where it was.
   if (!reorder.active && navHtml !== serverNavHtml) {
     const nav = $('#server-nav');
-    const focusSid = document.activeElement?.closest?.('#server-nav [data-sid]')?.dataset.sid;
-    const onGrip = Boolean(document.activeElement?.closest?.('#server-nav [data-grip]'));
+    const active = document.activeElement;
+    const row = active?.closest?.('#server-nav [data-sid], #server-nav [data-folder]');
+    const rowSel = row && (row.dataset.sid ? `[data-sid="${row.dataset.sid}"]` : `[data-folder="${CSS.escape(row.dataset.folder)}"]`);
+    const part = ['[data-grip]', '[data-folder-toggle]', '[data-folder-menu]', '[data-folder-power]'].find((p) => active.matches?.(p));
     nav.innerHTML = navHtml;
     serverNavHtml = navHtml;
-    if (focusSid) $(`#server-nav [data-sid="${focusSid}"]${onGrip ? ' [data-grip]' : ''}`)?.focus();
+    if (rowSel) {
+      const again = $(`#server-nav ${rowSel}`);
+      (part ? $(part, again) : again)?.focus();
+    }
   }
 
   const u = me();
@@ -498,39 +536,55 @@ setNavCollapsed(pref.get('navCollapsed', false));
 // account, so every device shows it, and the dashboard lists your servers in the same order.
 let serverNavHtml = '';
 const reorder = { active: false };
-/** The sidebar as it stands: server ids top to bottom, and each folder with the servers below its header. */
+/**
+ * The sidebar as it stands: server ids top to bottom, each folder with the servers inside it, and the top level
+ * (servers in no folder, and folders as 'f:<id>') in order.
+ */
 function navLayout(folders = myFolders()) {
   const out = folders.map((f) => ({ id: f.id, name: f.name, ids: [] }));
   const byId = new Map(out.map((f) => [f.id, f]));
   const ids = [];
+  const top = [];
   let inside = null;
   for (const el of $('#server-nav').children) {
-    if (el.dataset.folder) inside = byId.get(el.dataset.folder) || null;
+    if (el.dataset.folder) {
+      inside = byId.get(el.dataset.folder) || null;
+      if (inside) top.push(`f:${inside.id}`);
+    } else if (el.dataset.folderEnd !== undefined) inside = null;
     else if (el.dataset.sid) {
       ids.push(el.dataset.sid);
-      inside?.ids.push(el.dataset.sid);
+      if (inside) inside.ids.push(el.dataset.sid);
+      else top.push(el.dataset.sid);
     }
   }
-  return { ids, folders: out };
+  for (const f of out) if (!top.includes(`f:${f.id}`)) top.push(`f:${f.id}`); // a folder made just now goes last
+  return { ids, folders: out, top };
 }
 
-function saveServerOrder({ ids, folders }) {
-  state.serverOrder = { ids, folders, at: Date.now() };
+function saveServerOrder({ ids, folders, top }) {
+  state.serverOrder = { ids, folders, top, at: Date.now() };
   renderChrome();
   current?.update?.();
-  api('PUT', '/api/account/server-order', { order: ids, folders })
+  api('PUT', '/api/account/server-order', { order: ids, folders, top })
     .then((r) => {
-      if (state.overview?.me) Object.assign(state.overview.me, { serverOrder: r.serverOrder, serverFolders: r.serverFolders });
+      if (state.overview?.me) Object.assign(state.overview.me, { serverOrder: r.serverOrder, serverFolders: r.serverFolders, serverTop: r.serverTop });
     })
     .catch((err) => toast(`Could not save the order: ${err.message}`, 'bad'));
 }
 
-// The servers of a folded folder are in the list but hidden: a drag or arrow key skips over them, taking them along
-// with their folder header, so they stay in their folder.
+// Moving things in the list. The servers and end mark of a folded folder are there but hidden: a server skips over
+// them and passes a folded folder whole, so it stays out of it (and its servers stay in it).
 const shown = (el, dir) => {
   while (el?.hidden) el = el[dir];
   return el;
 };
+const endOf = (head) => $(`#server-nav [data-folder-end="${CSS.escape(head.dataset.folder)}"]`);
+/** What a server passes next going up or down: `at` is what the pointer has to cross, `to` the last thing it passes. */
+function serverStep(item, up) {
+  const at = shown(up ? item.previousElementSibling : item.nextElementSibling, up ? 'previousElementSibling' : 'nextElementSibling');
+  if (!at) return null;
+  return { at, to: !up && at.dataset.folder && endOf(at)?.hidden ? endOf(at) : at };
+}
 function passUp(item, sib) {
   const run = [];
   for (let n = sib; n !== item; n = n.nextElementSibling) run.push(n);
@@ -544,68 +598,194 @@ function passDown(item, sib) {
   }
   item.before(...run);
 }
+/** A folder with its servers and end mark, or a server on its own: what moves as one when a folder is moved. */
+function blockOf(el) {
+  if (!el.dataset.folder) return [el];
+  const out = [el];
+  for (let n = el.nextElementSibling; n; n = n.nextElementSibling) {
+    out.push(n);
+    if (n.dataset.folderEnd === el.dataset.folder) break;
+  }
+  return out;
+}
+/** The block a moving folder passes next. Folders only pass whole blocks, so a folder never lands inside another. */
+function folderStep(block, up) {
+  if (!up) {
+    const n = block[block.length - 1].nextElementSibling;
+    return n ? blockOf(n) : null;
+  }
+  const p = block[0].previousElementSibling;
+  if (!p) return null;
+  return p.dataset.folderEnd !== undefined ? blockOf($(`#server-nav [data-folder="${CSS.escape(p.dataset.folderEnd)}"]`)) : [p];
+}
+const blockMid = (els) => {
+  const seen = els.filter((el) => !el.hidden);
+  return (seen[0].getBoundingClientRect().top + seen[seen.length - 1].getBoundingClientRect().bottom) / 2;
+};
 
 const serverNav = $('#server-nav');
-serverNav.addEventListener('click', async (e) => {
-  if (e.target.closest('[data-grip]')) e.preventDefault(); // the handle moves the server; it does not open it
-  const head = e.target.closest('[data-folder]');
-  if (!head) return;
-  const id = head.dataset.folder;
-  const folders = myFolders();
-  const f = folders.find((x) => x.id === id);
-  if (!f) return;
-  if (e.target.closest('[data-folder-toggle]')) {
-    const closed = new Set(pref.get('closedFolders', []));
-    closed.has(id) ? closed.delete(id) : closed.add(id);
-    pref.set('closedFolders', [...closed]);
-    renderChrome();
-  } else if (e.target.closest('[data-folder-rename]')) {
-    const name = (await promptBox('Rename folder', 'Name', f.name, { confirmText: 'Rename' }))?.trim();
-    if (name && name !== f.name) saveServerOrder(navLayout(folders.map((x) => (x.id === id ? { ...x, name } : x))));
-  } else if (e.target.closest('[data-folder-delete]')) {
-    saveServerOrder(navLayout(folders.filter((x) => x.id !== id)));
-    toast(`Deleted the folder ${f.name}. Its servers are still here.`, 'ok');
-  }
-});
-$('#servers-label').insertAdjacentHTML('beforeend', `<button type="button" class="icon-btn" id="new-folder" title="New folder" aria-label="New folder">${icon('newFolder')}</button>`);
-$('#new-folder').onclick = async () => {
+
+// Folder actions, shared by the buttons on a folder and the right-click menus.
+function toggleFolder(id) {
+  const closed = new Set(pref.get('closedFolders', []));
+  closed.has(id) ? closed.delete(id) : closed.add(id);
+  pref.set('closedFolders', [...closed]);
+  renderChrome();
+}
+function setAllFolders(open) {
+  pref.set('closedFolders', open ? [] : myFolders().map((f) => f.id));
+  renderChrome();
+}
+/** A new folder at the bottom; with `serverId`, that server goes straight into it. */
+async function newFolder(serverId) {
   const name = (await promptBox('New folder', 'Name', '', { confirmText: 'Create' }))?.trim();
   if (!name) return;
   const folders = [...myFolders(), { id: Math.random().toString(36).slice(2, 10), name, ids: [] }];
+  if (serverId) return moveToFolder(serverId, folders[folders.length - 1].id, folders);
   saveServerOrder(navLayout(folders));
-  toast('Folder created. Drag servers into it by their handle.', 'ok');
+  toast('Folder created. Drag servers into it.', 'ok');
+}
+async function renameFolder(id) {
+  const folders = myFolders();
+  const f = folders.find((x) => x.id === id);
+  const name = (await promptBox('Rename folder', 'Name', f.name, { confirmText: 'Rename' }))?.trim();
+  if (name && name !== f.name) saveServerOrder(navLayout(folders.map((x) => (x.id === id ? { ...x, name } : x))));
+}
+function deleteFolder(id) {
+  const folders = myFolders();
+  const f = folders.find((x) => x.id === id);
+  saveServerOrder(navLayout(folders.filter((x) => x.id !== id)));
+  toast(`Deleted the folder ${f.name}. Its servers are still here.`, 'ok');
+}
+/** Put a server at the end of a folder (folderId null: with the servers in no folder), and unfold that folder. */
+function moveToFolder(serverId, folderId, folders = myFolders()) {
+  const next = folders.map((f) => ({ ...f, ids: f.ids.filter((x) => x !== serverId).concat(f.id === folderId ? [serverId] : []) }));
+  const ids = myServers()
+    .map((x) => x.id)
+    .filter((x) => x !== serverId)
+    .concat(serverId);
+  const top = navLayout(folders).top.filter((t) => t !== serverId);
+  if (!folderId) top.push(serverId);
+  if (folderId) pref.set('closedFolders', pref.get('closedFolders', []).filter((x) => x !== folderId));
+  saveServerOrder({ ids, folders: next, top });
+}
+/** Your servers in a folder, as the sidebar shows them. */
+const folderServers = (id) => {
+  const f = myFolders().find((x) => x.id === id);
+  return f ? myServers().filter((s) => f.ids.includes(s.id)) : [];
 };
+/** Start every stopped server in a folder, or stop every running one (stopping asks first). */
+async function folderPower(id, action) {
+  const f = myFolders().find((x) => x.id === id);
+  if (!f) return;
+  const list = folderServers(id);
+  const todo = action === 'start' ? list.filter((s) => !s.pid && !s.busy) : list.filter((s) => s.pid && s.status !== 'stopping');
+  if (!todo.length) return toast(action === 'start' ? `Everything in ${f.name} is already running` : `Nothing in ${f.name} is running`, 'info');
+  const n = `${todo.length} server${todo.length === 1 ? '' : 's'}`;
+  if (
+    action === 'stop' &&
+    !(await confirmBox(`Stop ${n} in ${f.name}?`, `${todo.map((s) => s.name).join(', ')}. Players on them are disconnected.`, { danger: true, confirmText: 'Stop all' }))
+  )
+    return;
+  const results = await Promise.allSettled(todo.map((s) => api('POST', `/api/servers/${s.id}/power`, { action })));
+  const failed = results.map((r, i) => (r.status === 'rejected' ? `${todo[i].name}: ${r.reason.message}` : null)).filter(Boolean);
+  const done = todo.length - failed.length;
+  if (done) toast(`${action === 'start' ? 'Starting' : 'Stopping'} ${done} server${done === 1 ? '' : 's'} in ${f.name}`, 'ok');
+  if (failed.length) toast(`Could not ${action} ${failed.join('; ')}`, 'bad');
+  poll();
+}
+/** Servers A to Z, within each folder too. */
+function sortServersByName() {
+  const ids = [...myServers()].sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })).map((x) => x.id);
+  // Servers in no folder are sorted among themselves; the folders keep their places.
+  const { top } = navLayout();
+  const loose = ids.filter((id) => top.includes(id));
+  let k = 0;
+  saveServerOrder({ ids, folders: myFolders().map((f) => ({ ...f, ids: ids.filter((id) => f.ids.includes(id)) })), top: top.map((t) => (t.startsWith('f:') ? t : loose[k++])) });
+}
+
+serverNav.addEventListener('click', (e) => {
+  if (e.target.closest('[data-grip]')) e.preventDefault(); // the handle moves the server; it does not open it
+  // A drag ends with a click on the row it started on: that click does not open the server.
+  if (Date.now() - reorder.droppedAt < 300 && e.target.closest('[data-sid], [data-folder]')) return e.preventDefault();
+  const head = e.target.closest('[data-folder]');
+  const id = head?.dataset.folder;
+  if (!id || !myFolders().some((f) => f.id === id)) return;
+  const menuBtn = e.target.closest('[data-folder-menu]');
+  if (e.target.closest('[data-folder-toggle]')) toggleFolder(id);
+  else if (e.target.closest('[data-folder-power]')) folderPower(id, e.target.closest('[data-folder-power]').dataset.folderPower);
+  else if (menuBtn && !(ctxClosed.from === menuBtn && Date.now() - ctxClosed.at < 400)) {
+    // Clicking the name again while its menu is open just closes the menu.
+    const r = menuBtn.getBoundingClientRect();
+    openCtxMenu(r.left, r.bottom + 4, folderMenu(id), menuBtn);
+  }
+});
+$('#servers-label').insertAdjacentHTML('beforeend', `<button type="button" class="icon-btn" id="new-folder" title="New folder" aria-label="New folder">${icon('newFolder')}</button>`);
+$('#new-folder').onclick = () => newFolder();
+
+// Dragging: with a mouse, anywhere on a server or folder (a plain click still does what it did; the drag starts after a
+// few pixels); on touch screens by the handle only, so the list still scrolls. A folder folds while it moves.
+reorder.droppedAt = 0;
 serverNav.addEventListener('pointerdown', (e) => {
+  const item = e.target.closest('[data-sid], [data-folder]');
   const grip = e.target.closest('[data-grip]');
-  if (!grip || e.button !== 0) return;
-  e.preventDefault();
-  const item = grip.closest('[data-sid]');
-  const before = JSON.stringify(navLayout());
-  reorder.active = true;
-  item.classList.add('dragging');
-  serverNav.classList.add('reordering');
-  document.body.classList.add('dragging-server');
+  if (!item || e.button !== 0 || !item.querySelector('[data-grip]') || (!grip && e.pointerType !== 'mouse')) return;
+  if (grip) e.preventDefault();
+  const x0 = e.clientX;
+  const y0 = e.clientY;
+  const folder = Boolean(item.dataset.folder);
+  let dragging = false;
+  let before = '';
+  let block = [item];
+  let folded = []; // a moving folder's rows, hidden while it moves
   const mid = (el) => {
     const r = el.getBoundingClientRect();
     return r.top + r.height / 2;
   };
+  const begin = () => {
+    dragging = true;
+    before = JSON.stringify(navLayout());
+    if (folder) {
+      block = blockOf(item);
+      folded = block.slice(1).filter((el) => !el.hidden);
+      folded.forEach((el) => (el.hidden = true));
+    }
+    reorder.active = true;
+    item.classList.add('dragging');
+    serverNav.classList.add('reordering');
+    document.body.classList.add('dragging-server');
+    window.getSelection()?.removeAllRanges();
+  };
   // Move the neighbours rather than the dragged item, so the browser never loses track of the pointer.
   const move = (ev) => {
+    if (!dragging) {
+      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
+      begin();
+    }
     const sb = sidebar.getBoundingClientRect();
     if (ev.clientY < sb.top + 40) sidebar.scrollTop -= 12;
     else if (ev.clientY > sb.bottom - 40) sidebar.scrollTop += 12;
-    let sib;
-    while ((sib = shown(item.previousElementSibling, 'previousElementSibling')) && ev.clientY < mid(sib)) passUp(item, sib);
-    while ((sib = shown(item.nextElementSibling, 'nextElementSibling')) && ev.clientY > mid(sib)) passDown(item, sib);
+    if (folder) {
+      let b;
+      while ((b = folderStep(block, true)) && ev.clientY < blockMid(b)) block[block.length - 1].after(...b);
+      while ((b = folderStep(block, false)) && ev.clientY > blockMid(b)) block[0].before(...b);
+      return;
+    }
+    let st;
+    while ((st = serverStep(item, true)) && ev.clientY < mid(st.at)) passUp(item, st.to);
+    while ((st = serverStep(item, false)) && ev.clientY > mid(st.at)) passDown(item, st.to);
   };
   const end = () => {
     document.removeEventListener('pointermove', move);
     document.removeEventListener('pointerup', end);
     document.removeEventListener('pointercancel', end);
+    if (!dragging) return;
+    folded.forEach((el) => (el.hidden = false));
     item.classList.remove('dragging');
     serverNav.classList.remove('reordering');
     document.body.classList.remove('dragging-server');
     reorder.active = false;
+    reorder.droppedAt = Date.now();
     if (JSON.stringify(navLayout()) !== before) saveServerOrder(navLayout());
   };
   document.addEventListener('pointermove', move);
@@ -616,13 +796,167 @@ serverNav.addEventListener('keydown', (e) => {
   const grip = e.target.closest('[data-grip]');
   if (!grip || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
   e.preventDefault();
-  const item = grip.closest('[data-sid]');
+  const item = grip.closest('[data-sid], [data-folder]');
   const up = e.key === 'ArrowUp';
-  const sib = up ? shown(item.previousElementSibling, 'previousElementSibling') : shown(item.nextElementSibling, 'nextElementSibling');
-  if (!sib) return;
-  // Move the neighbour past it, so the handle keeps the keyboard focus.
-  up ? passUp(item, sib) : passDown(item, sib);
+  // Move the neighbours past it, so the handle keeps the keyboard focus.
+  if (item.dataset.folder) {
+    const block = blockOf(item);
+    const b = folderStep(block, up);
+    if (!b) return;
+    up ? block[block.length - 1].after(...b) : block[0].before(...b);
+  } else {
+    const st = serverStep(item, up);
+    if (!st) return;
+    up ? passUp(item, st.to) : passDown(item, st.to);
+  }
   saveServerOrder(navLayout());
+});
+
+// ---------------------------------------------------------------- right-click menus
+// items: { label, icon, run, disabled, danger, checked }, '-' for a divider, or { heading }.
+let ctxMenu = null;
+let ctxClosed = { from: null, at: 0 }; // what opened the last menu, and when it closed
+function closeCtxMenu(refocus = false) {
+  if (!ctxMenu) return;
+  ctxClosed = { from: ctxMenu.from, at: Date.now() };
+  ctxMenu.el.remove();
+  if (refocus) ctxMenu.from?.focus?.();
+  ctxMenu = null;
+}
+function openCtxMenu(x, y, items, from) {
+  closeCtxMenu();
+  const el = document.createElement('div');
+  el.className = 'ctx-menu';
+  el.setAttribute('role', 'menu');
+  el.innerHTML = items
+    .map((it, i) =>
+      it === '-'
+        ? '<div class="ctx-sep" role="separator"></div>'
+        : it.heading
+          ? `<div class="ctx-head">${esc(it.heading)}</div>`
+          : `<button type="button" role="${it.checked === undefined ? 'menuitem' : 'menuitemradio'}" ${it.checked === undefined ? '' : `aria-checked="${it.checked}"`} data-i="${i}" class="${it.danger ? 'danger' : ''}" ${
+              it.disabled ? 'disabled' : ''
+            }>${it.icon ? icon(it.icon) : '<span class="ctx-ic"></span>'}<span>${esc(it.label)}</span>${it.checked ? '<span class="ctx-check" aria-hidden="true">✓</span>' : ''}</button>`,
+    )
+    .join('');
+  document.body.append(el);
+  const r = el.getBoundingClientRect();
+  el.style.left = `${Math.max(4, Math.min(x, innerWidth - r.width - 4))}px`;
+  el.style.top = `${Math.max(4, Math.min(y, innerHeight - r.height - 4))}px`;
+  el.onclick = (e) => {
+    const b = e.target.closest('[data-i]');
+    if (!b) return;
+    closeCtxMenu();
+    items[b.dataset.i].run();
+  };
+  el.onkeydown = (e) => {
+    const all = $$('button:not(:disabled)', el);
+    const at = all.indexOf(document.activeElement);
+    if (e.key === 'Escape') closeCtxMenu(true);
+    else if (e.key === 'Tab') closeCtxMenu(true);
+    else if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
+      const n = { ArrowDown: at + 1, ArrowUp: at - 1, Home: 0, End: all.length - 1 }[e.key];
+      all[(n + all.length) % all.length]?.focus();
+    } else return;
+    e.preventDefault();
+  };
+  ctxMenu = { el, from };
+  $('button:not(:disabled)', el)?.focus();
+}
+document.addEventListener('pointerdown', (e) => ctxMenu && !ctxMenu.el.contains(e.target) && closeCtxMenu(), true);
+window.addEventListener('blur', () => closeCtxMenu());
+window.addEventListener('resize', () => closeCtxMenu());
+window.addEventListener('hashchange', () => closeCtxMenu());
+sidebar.addEventListener('scroll', () => closeCtxMenu());
+
+function serverMenu(id) {
+  const s = findServer(id);
+  if (!s) return [];
+  const running = Boolean(s.pid);
+  const busy = Boolean(s.busy && s.busy !== 'Backing up');
+  const stopping = s.status === 'stopping';
+  const go = (hash) => () => (location.hash = hash);
+  const copy = (text, what) => async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(`Copied ${what}`, 'ok');
+    } catch {
+      toast('Could not copy to the clipboard', 'bad');
+    }
+  };
+  const folders = myFolders();
+  const inFolder = folders.find((f) => f.ids.includes(id))?.id || null;
+  return [
+    { heading: s.name },
+    { label: 'Open', icon: 'server', run: go(`#/server/${id}`) },
+    { label: 'Open in a new tab', icon: 'external', run: () => window.open(`#/server/${id}`, '_blank', 'noopener') },
+    ...TABS.filter(([k]) => ['console', 'players', 'addons', 'files', 'settings'].includes(k)).map(([k, label, ic]) => ({
+      label: k === 'addons' ? addonLabel(s) : label,
+      icon: ic,
+      run: go(`#/server/${id}/${k}`),
+    })),
+    '-',
+    { label: 'Start', icon: 'play', disabled: running || Boolean(s.busy), run: () => power(id, 'start') },
+    { label: 'Restart', icon: 'restart', disabled: !running || busy || stopping, run: () => power(id, 'restart') },
+    { label: 'Stop', icon: 'stop', disabled: !running || stopping, run: () => power(id, 'stop') },
+    ...(running ? [{ label: 'Kill process', icon: 'bolt', danger: true, run: () => power(id, 'kill') }] : []),
+    '-',
+    { label: 'Copy address', icon: 'copy', run: copy(serverAddress(s), serverAddress(s)) },
+    { label: 'Copy server ID', icon: 'copy', run: copy(s.id, `the ID ${s.id}`) },
+    '-',
+    { heading: 'Move to folder' },
+    ...folders.map((f) => ({ label: f.name, icon: 'folder', checked: f.id === inFolder, disabled: f.id === inFolder, run: () => moveToFolder(id, f.id) })),
+    ...(folders.length ? [{ label: 'No folder', checked: !inFolder, disabled: !inFolder, run: () => moveToFolder(id, null) }] : []),
+    { label: 'New folder...', icon: 'newFolder', run: () => newFolder(id) },
+  ];
+}
+function folderMenu(id) {
+  const f = myFolders().find((x) => x.id === id);
+  if (!f) return [];
+  const open = !pref.get('closedFolders', []).includes(id);
+  const inside = folderServers(id);
+  return [
+    { heading: f.name },
+    { label: 'Rename...', icon: 'edit', run: () => renameFolder(id) },
+    { label: 'Delete folder (servers stay)', icon: 'trash', danger: true, run: () => deleteFolder(id) },
+    '-',
+    { label: 'Start all', icon: 'play', disabled: !inside.some((s) => !s.pid && !s.busy), run: () => folderPower(id, 'start') },
+    { label: 'Stop all', icon: 'stop', disabled: !inside.some((s) => s.pid && s.status !== 'stopping'), run: () => folderPower(id, 'stop') },
+    '-',
+    { label: open ? 'Fold' : 'Unfold', icon: 'folder', run: () => toggleFolder(id) },
+    ...sectionMenu().slice(1),
+  ];
+}
+function sectionMenu() {
+  const folders = myFolders();
+  return [
+    { heading: 'Your servers' },
+    { label: 'New folder...', icon: 'newFolder', run: () => newFolder() },
+    { label: 'New server', icon: 'plus', run: () => (location.hash = '#/new') },
+    '-',
+    { label: 'Sort servers by name', icon: 'arrow', disabled: myServers().length < 2, run: sortServersByName },
+    ...(folders.length
+      ? [
+          { label: 'Fold all folders', icon: 'folder', run: () => setAllFolders(false) },
+          { label: 'Unfold all folders', icon: 'folder', run: () => setAllFolders(true) },
+        ]
+      : []),
+  ];
+}
+// Right-click (or the menu key) on a server, a folder, or anywhere else in the Your servers part of the sidebar.
+sidebar.addEventListener('contextmenu', (e) => {
+  const t = e.target;
+  if (!t.closest('#server-nav, #servers-label') && t !== sidebar) return;
+  const row = t.closest('[data-sid], [data-folder]');
+  const items = row?.dataset.sid ? serverMenu(row.dataset.sid) : row ? folderMenu(row.dataset.folder) : sectionMenu();
+  if (!items.length) return;
+  e.preventDefault();
+  let { clientX: x, clientY: y } = e;
+  if (!x && !y) {
+    const r = (row || t).getBoundingClientRect(); // from the keyboard: next to the item
+    [x, y] = [r.left + 24, r.bottom];
+  }
+  openCtxMenu(x, y, items, document.activeElement);
 });
 
 // ================================================================ notifications (the bell, top right)
@@ -866,28 +1200,93 @@ function serverCard(s, { owner = true } = {}) {
     </article>`;
 }
 
+/** Servers as cards (the default) or as a table with a row each; the choice is remembered in this browser. */
+const serversView = () => (pref.get('serversView', 'cards') === 'table' ? 'table' : 'cards');
+const viewSwitch = () => {
+  const v = serversView();
+  return `<div class="seg" role="group" aria-label="Show servers as">${[
+    ['cards', 'Cards'],
+    ['table', 'Table'],
+  ]
+    .map(([k, label]) => `<button type="button" data-servers-view="${k}" class="${v === k ? 'active' : ''}" aria-pressed="${v === k}">${label}</button>`)
+    .join('')}</div>`;
+};
+function serverList(servers, opts = {}) {
+  if (serversView() === 'cards') return `<div class="server-grid">${servers.map((s) => serverCard(s, opts)).join('')}</div>`;
+  return `<div class="card table-wrap"><table class="table server-table">
+      <thead><tr><th>Server</th><th>Actions</th><th>CPU</th><th>Memory</th><th>Players</th><th>Address</th><th>Status</th></tr></thead>
+      <tbody>${servers.map((s) => serverRow(s, opts)).join('')}</tbody></table></div>`;
+}
+function serverRow(s, { owner = true } = {}) {
+  const running = Boolean(s.pid);
+  const busy = Boolean(s.busy && s.busy !== 'Backing up');
+  const stopping = s.status === 'stopping';
+  const maxMem = s.maxRam * 1024 * 1024;
+  const name = esc(s.name);
+  const btn = (action, ic, label, disabled, cls = '') =>
+    `<button type="button" class="icon-btn ${cls}" data-power="${action}" title="${label}" aria-label="${label} ${name}" ${disabled ? 'disabled' : ''}>${icon(ic)}</button>`;
+  return `
+    <tr data-server="${s.id}">
+      <td><div class="row" style="gap:10px;flex-wrap:nowrap">${srvIcon(s)}<div style="min-width:0"><a class="srv-name" href="#/server/${s.id}">${name}</a><div class="faint small">${esc(
+        softwareLabel(s),
+      )}${owner ? ` ${ownerChip(s)}` : ''}</div></div></div></td>
+      <td><div class="row" style="gap:2px;flex-wrap:nowrap">${btn('start', 'play', 'Start', running || s.busy)}${btn('restart', 'restart', 'Restart', !running || busy || stopping)}${btn(
+        'stop',
+        'stop',
+        'Stop',
+        !running || stopping,
+      )}${running ? btn('kill', 'bolt', 'Kill process', false, 'danger') : ''}</div></td>
+      <td class="meter"><div class="mono small">${running ? `${s.stats.cpu.toFixed(1)}%` : '—'}</div><div class="bar"><i style="width:${running ? Math.min(100, s.stats.cpu) : 0}%"></i></div></td>
+      <td class="meter"><div class="mono small">${running ? `${fmtBytes(s.stats.mem)} / ${fmtBytes(maxMem)}` : '—'}</div><div class="bar"><i style="width:${running ? pct(s.stats.mem, maxMem) : 0}%"></i></div></td>
+      <td class="mono small nowrap">${s.playerCount} / ${s.maxPlayers || '—'}</td>
+      <td>${addrChip(s)}</td>
+      <td>${statusPill(s)}</td>
+    </tr>`;
+}
+document.addEventListener('click', (e) => {
+  const view = e.target.closest('[data-servers-view]');
+  if (view) {
+    pref.set('serversView', view.dataset.serversView);
+    return current?.update?.();
+  }
+  if (e.target.closest('[data-hero-toggle]')) {
+    pref.set('heroCollapsed', !pref.get('heroCollapsed', false));
+    current?.update?.();
+  }
+});
+
 function Dashboard(root) {
   function render() {
     const { host, panel } = state.overview;
     const servers = myServers();
     const others = state.overview.servers.length - servers.length;
+    const small = pref.get('heroCollapsed', false);
+    const sz = small ? 'btn-sm' : '';
+    const links = `<a class="btn btn-accent ${sz}" href="#/new">${icon('plus')}New server</a><a class="btn ${sz}" href="#/status">${icon('signal')}Check a server</a><a class="btn ${sz}" href="#/activity">Recent activity</a>`;
+    const toggle = `<button type="button" class="icon-btn hero-toggle" data-hero-toggle aria-expanded="${!small}" title="${small ? 'Show the full welcome' : 'Make this smaller'}" aria-label="${
+      small ? 'Show the full welcome' : 'Make the welcome smaller'
+    }"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
     root.innerHTML = `
-      <section class="hero">
+      ${
+        small
+          ? `<section class="hero hero-min"><div class="row"><h1>${greeting()}. Welcome to <span class="text-gradient">${esc(panel.name)}</span></h1><span class="spacer"></span>${links}${toggle}</div></section>`
+          : `<section class="hero">${toggle}
         <div class="page-head" style="margin:0"><div>
           <div class="eyebrow" style="color:var(--accent)">Minecraft server panel</div>
           <h1>${greeting()}. Welcome to <span class="text-gradient">${esc(panel.name)}</span></h1>
           <p>Create, run and look after your Minecraft servers from one place: live console, files, backups, schedules and players.</p>
         </div></div>
-        <div class="row"><a class="btn btn-accent" href="#/new">${icon('plus')}New server</a><a class="btn" href="#/status">${icon('signal')}Check a server</a><a class="btn" href="#/activity">Recent activity</a></div>
-      </section>
+        <div class="row">${links}</div>
+      </section>`
+      }
       <div class="tiles">${hostTiles(host, servers)}</div>
       <div class="section">
-        <div class="row section-head"><h2>${others ? 'Your servers' : 'Servers'}</h2><span class="spacer"></span>${
+        <div class="row section-head"><h2>${others ? 'Your servers' : 'Servers'}</h2><span class="spacer"></span>${servers.length ? viewSwitch() : ''}${
           others ? `<a class="btn btn-sm" href="#/all">${icon('people')}All servers (${state.overview.servers.length})</a>` : ''
         }</div>
         ${
           servers.length
-            ? `<div class="server-grid">${servers.map((s) => serverCard(s)).join('')}</div>`
+            ? serverList(servers)
             : `<div class="card empty-state">
                  <div class="big">${icon('server').replace('<svg', '<svg style="width:64px;height:64px;color:var(--secondary-soft)"')}</div>
                  <h2>No servers yet</h2>
@@ -1487,13 +1886,13 @@ function MetricsTab(el, ctx) {
   }
   load();
   details();
-  const timer = setInterval(load, 3000);
+  const timer = live(load, 3000);
   const onResize = () => draw();
   window.addEventListener('resize', onResize);
   return {
     update: details,
     destroy() {
-      clearInterval(timer);
+      unlive(timer);
       window.removeEventListener('resize', onResize);
     },
   };
@@ -1643,8 +2042,8 @@ function PlayersTab(el, ctx) {
     }
   }
   load();
-  const timer = setInterval(load, 5000);
-  return { update: render, destroy: () => clearInterval(timer) };
+  const timer = live(load, 5000);
+  return { update: render, destroy: () => unlive(timer) };
 }
 
 // ---------------------------------------------------------------- plugins / mods tab
@@ -2272,12 +2671,12 @@ function AddonsTab(el, ctx) {
       relooking = false;
     }
   };
-  const timer = setInterval(relook, 8000);
+  const timer = live(relook, 8000);
   return {
     update: restartHint,
     destroy: () => {
       clearTimeout(searchTimer);
-      clearInterval(timer);
+      unlive(timer);
     },
   };
 }
@@ -2668,8 +3067,8 @@ function FilesTab(el, ctx) {
       looking = false;
     }
   };
-  const timer = setInterval(relook, 4000);
-  return { destroy: () => clearInterval(timer) };
+  const timer = live(relook, 4000);
+  return { destroy: () => unlive(timer) };
 }
 
 // ---------------------------------------------------------------- properties tab: server list look + server.properties
@@ -3633,8 +4032,8 @@ function SchedulesTab(el, ctx) {
   });
 
   load();
-  const timer = setInterval(load, 15000);
-  return { destroy: () => clearInterval(timer) };
+  const timer = live(load, 15000);
+  return { destroy: () => unlive(timer) };
 }
 
 // ---------------------------------------------------------------- server settings tab
@@ -3949,8 +4348,8 @@ function Activity(root) {
     }
   }
   load();
-  const timer = setInterval(load, 5000);
-  return { destroy: () => clearInterval(timer) };
+  const timer = live(load, 5000);
+  return { destroy: () => unlive(timer) };
 }
 
 // ================================================================ server status checker
@@ -4364,7 +4763,7 @@ function AllServers(root) {
   }
   root.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Admin</div><h1>All servers</h1><p>Every server on this panel, grouped by the account that owns it.</p></div>
-      <div class="input-group all-search"><input class="input" id="all-q" type="search" placeholder="Filter by server or account" autocomplete="off" spellcheck="false"></div></div>
+      <div class="row" style="gap:10px"><div id="all-view"></div><div class="input-group all-search"><input class="input" id="all-q" type="search" placeholder="Filter by server or account" autocomplete="off" spellcheck="false"></div></div></div>
     <div id="all-list"><p class="muted">Loading...</p></div>`;
   let people = new Map();
   let ready = false;
@@ -4386,11 +4785,12 @@ function AllServers(root) {
           ${u ? mePic(u) : `<span class="me-pic">${owner ? esc(owner[0].toUpperCase()) : icon('people')}</span>`}
           <div class="me-who"><strong>${esc(who.name)} ${tags}</strong><span>${esc(who.sub)}${who.sub ? ' · ' : ''}${list.length} server${list.length === 1 ? '' : 's'}, ${online} online, ${players} player${players === 1 ? '' : 's'}</span></div>
         </div>
-        <div class="server-grid">${list.map((s) => serverCard(s, { owner: false })).join('')}</div>
+        ${serverList(list, { owner: false })}
       </section>`;
   }
 
   function render() {
+    $('#all-view', root).innerHTML = viewSwitch();
     if (!ready) return;
     const term = q.value.trim().toLowerCase();
     const groups = new Map();
@@ -4542,8 +4942,8 @@ function Ports(root) {
   q.oninput = render;
   $('#ports-refresh', root).onclick = load;
   load();
-  const timer = setInterval(load, 15000);
-  return { destroy: () => clearInterval(timer) };
+  const timer = live(load, 15000);
+  return { destroy: () => unlive(timer) };
 }
 
 // ================================================================ account
@@ -4997,8 +5397,8 @@ function renderPlayit(card) {
     }
   };
   refresh();
-  const timer = setInterval(refresh, 3000);
-  return () => clearInterval(timer);
+  const timer = live(refresh, 3000);
+  return () => unlive(timer);
 }
 
 /** Panel settings > Updates: the running version, new commits, and the button that stops the servers and updates. */
@@ -5395,7 +5795,7 @@ function PanelSettings(root, args = []) {
     renderUsers($('#ps-users', root), s, info);
     // New sign-ups, and changes made by another admin, show up without a reload (not while you type in the card).
     const usersCard = $('#ps-users', root);
-    usersTimer = setInterval(async () => {
+    usersTimer = live(async () => {
       if (document.hidden || $('.modal-backdrop') || usersCard.contains(document.activeElement) || $('#ps-add-id', usersCard)?.value) return;
       try {
         if (usersSig(await api('GET', '/api/users')) !== usersCard.dataset.sig) renderUsers(usersCard, (await api('GET', '/api/settings')).settings, info);
@@ -5444,7 +5844,7 @@ function PanelSettings(root, args = []) {
   return {
     destroy: () => {
       stopPlayit?.();
-      clearInterval(usersTimer);
+      unlive(usersTimer);
     },
   };
 }
@@ -5493,6 +5893,50 @@ function offerReload() {
   document.body.append(bar);
 }
 
+// ---------------------------------------------------------------- live updates
+// The panel says when its data changed (GET /api/events: an account approved, a server added, a share, a setting...),
+// and the open page fetches again at once instead of waiting for its next timer. Pages register their refresh with
+// live() in place of setInterval; the timer stays as a fallback.
+const liveFns = new Map();
+let liveSeq = 0;
+function live(fn, ms) {
+  const id = ++liveSeq;
+  liveFns.set(id, { fn, timer: setInterval(fn, ms) });
+  return id;
+}
+function unlive(id) {
+  clearInterval(liveFns.get(id)?.timer);
+  liveFns.delete(id);
+}
+let liveLast = 0;
+let liveTimer = null;
+/** Fetch everything the page shows again; at most once a second, as saves come in bursts. */
+function liveRefresh() {
+  if (document.hidden) return;
+  const wait = liveLast + 1000 - Date.now();
+  if (wait > 0) {
+    liveTimer ||= setTimeout(() => {
+      liveTimer = null;
+      liveRefresh();
+    }, wait);
+    return;
+  }
+  liveLast = Date.now();
+  poll();
+  for (const { fn } of [...liveFns.values()]) Promise.resolve().then(fn).catch(() => {});
+}
+function listenForChanges() {
+  if (!window.EventSource) return;
+  const es = new EventSource('/api/events');
+  let dropped = false;
+  es.addEventListener('change', liveRefresh);
+  es.onerror = () => (dropped = true); // the browser reconnects by itself
+  es.onopen = () => {
+    if (dropped) liveRefresh(); // changes made while the connection was down
+    dropped = false;
+  };
+}
+
 async function poll() {
   if (document.hidden && state.overview) return;
   try {
@@ -5527,6 +5971,7 @@ async function poll() {
     }, 3000);
   } else route();
   window.addEventListener('hashchange', route);
-  document.addEventListener('visibilitychange', () => !document.hidden && poll());
+  document.addEventListener('visibilitychange', () => !document.hidden && liveRefresh());
   setInterval(poll, 2500);
+  listenForChanges();
 })();
