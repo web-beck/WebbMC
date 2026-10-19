@@ -466,8 +466,17 @@ route('POST', '/api/account/google/unlink', ({ user }) => auth.unlinkGoogle(user
 route('POST', '/api/account/sign-out-everywhere', ({ req, res, user }) => auth.signOutEverywhere(req, res, user));
 
 // playit.gg tunnels (the panel's own computer, so admins only)
-route('GET', '/api/playit', () => playit.status(), { admin: true });
-route('POST', '/api/playit', ({ body }) => playit.act(String(body.action || '')), { admin: true });
+/** Each tunnel's uses: every server port it points at (game, Geyser, a web map...), as the Ports page lists them. */
+const withTunnelUses = (st) => {
+  const uses = manager.all().flatMap((inst) => ports.forServer(inst));
+  for (const t of st.tunnels || []) {
+    const port = Number(/:(\d+)\s*$/.exec(t.destination || '')?.[1]);
+    t.uses = uses.filter((u) => u.port === port).map((u) => ({ serverId: u.serverId, server: u.server, what: u.what }));
+  }
+  return st;
+};
+route('GET', '/api/playit', async () => withTunnelUses(await playit.status()), { admin: true });
+route('POST', '/api/playit', async ({ body }) => withTunnelUses(await playit.act(String(body.action || ''))), { admin: true });
 
 // Everyone's accounts: the admin approves, blocks, removes, makes admins and gives out one-time passwords
 route('GET', '/api/users', () => auth.listUsers(), { admin: true });

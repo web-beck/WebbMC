@@ -3642,7 +3642,7 @@ function ServerSettingsTab(el, ctx) {
 
       <div class="card panel-card">
         <h2>Location</h2>
-        <dl class="kv" style="margin-top:12px"><dt>Server ID</dt><dd class="mono">${esc(s.id)}</dd><dt>Folder</dt><dd class="mono small">${esc(s.dir)}</dd><dt>Created</dt><dd>${fmtDate(s.createdAt)}</dd></dl>
+        <dl class="kv" style="margin-top:12px"><dt>Server ID</dt><dd class="mono">${esc(s.id)}</dd><dt>Folder</dt><dd class="mono small" title="${esc(s.dir)}">${esc(s.dirShown || s.dir)}</dd><dt>Created</dt><dd>${fmtDate(s.createdAt)}</dd></dl>
       </div>
 
       ${
@@ -4774,10 +4774,6 @@ const PLAYIT_HOME = 'https://playit.gg/account/tunnels';
 function renderPlayit(card) {
   let last = '';
   let acting = false;
-  const serverFor = (dest) => {
-    const port = Number(/:(\d+)\s*$/.exec(dest || '')?.[1]);
-    return state.overview.servers.find((s) => s.port === port);
-  };
   /** What the panel found about a playit installed on this computer (when it is not using it). */
   function externalNote(ext) {
     if (!ext || ext.inUse || ext.state === 'none') return '';
@@ -4840,10 +4836,10 @@ function renderPlayit(card) {
     const tunnels = st.tunnels.length
       ? `<div class="table-wrap"><table class="table"><thead><tr><th>Address for players</th><th>Goes to</th><th>Server</th></tr></thead><tbody>${st.tunnels
           .map((t) => {
-            const srv = serverFor(t.destination);
+            const uses = (t.uses || []).map((u) => `<div><a href="#/server/${esc(u.serverId)}">${esc(u.server)}</a> <span class="faint small">${esc(u.what)}</span></div>`).join('');
             return `<tr><td>${t.address ? `<span class="addr">${esc(t.address)}<button type="button" data-copy="${esc(t.address)}" title="Copy">${icon('copy')}</button></span>` : '<span class="faint">Setting up...</span>'}${
               t.disabled ? ` <span class="tag warn" title="${esc(t.reason || '')}">Disabled</span>` : ''
-            }</td><td class="mono small">${esc(t.destination)}</td><td>${srv ? `<a href="#/server/${srv.id}">${esc(srv.name)}</a>` : '<span class="faint small">No server on that port</span>'}</td></tr>`;
+            }</td><td class="mono small">${esc(t.destination)}</td><td>${uses || '<span class="faint small">No server on that port</span>'}</td></tr>`;
           })
           .join('')}</tbody></table></div>
          <p class="hint">Servers show their tunnel address on the dashboard automatically (unless they have their own address in Settings).</p>`
