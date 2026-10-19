@@ -384,6 +384,16 @@ route('POST', '/api/notifications/seen', ({ user }) => auth.markNotifSeen(user))
 
 // Admin: every port the servers use, and panel updates
 route('GET', '/api/ports', () => ports.list(manager.all(), PORT), { admin: true });
+route(
+  'PUT',
+  '/api/ports',
+  async ({ user, body }) => {
+    const r = await ports.setPort(manager.all(), PORT, body || {});
+    if (r.changed) store.logActivity(r.row.serverId, `${user.id || 'An admin'} moved ${r.row.what} from port ${r.from} to ${r.port} (${r.file})`);
+    return { changed: r.changed, restart: r.restart || null };
+  },
+  { admin: true },
+);
 route('GET', '/api/update', () => updates.status(), { admin: true });
 route('POST', '/api/update/check', () => updates.check(), { admin: true });
 route('POST', '/api/update', ({ user }) => updates.apply(user), { admin: true });

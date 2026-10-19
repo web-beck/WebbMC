@@ -373,6 +373,9 @@ table.table { width: 100%; border-collapse: collapse; }
 .crumbs a { color: var(--muted); padding: 3px 6px; border-radius: 6px; }
 .crumbs a:hover { color: var(--accent); background: var(--surface-2); text-decoration: none; }
 .crumbs .sep { color: var(--faint); }
+.table .pick { width: 1%; padding-right: 0; }
+.table .pick input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; vertical-align: middle; }
+.table tr.picked td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
 .file-name { display: flex; align-items: center; gap: 10px; color: var(--fg); cursor: pointer; background: none; border: 0; font: inherit; padding: 0; text-align: left; }
 .file-name:hover { color: var(--accent); }
 .file-name svg { color: var(--muted); }

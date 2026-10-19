@@ -1764,7 +1764,7 @@ function AddonsTab(el, ctx) {
         ? '<span class="pill ok"><span class="dot ok"></span>Everything is up to date</span>'
         : '';
     $('#up-list', el).innerHTML = updates.length
-      ? `<table class="table"><thead><tr><th>${esc(what()[0].toUpperCase() + what().slice(1))}</th><th>Installed</th><th>Type</th><th>Status</th><th>On</th><th></th></tr></thead><tbody>${updates
+      ? `<table class="table"><thead><tr><th>${esc(what()[0].toUpperCase() + what().slice(1))}</th><th>Installed</th><th>Type</th><th>Released</th><th>Status</th><th>On</th><th></th></tr></thead><tbody>${updates
           .map(
             (u, i) => `<tr>
             <td><div class="row" style="gap:10px;flex-wrap:nowrap">${
@@ -1774,6 +1774,11 @@ function AddonsTab(el, ctx) {
             }</div><div class="mono faint small ellipsis">${esc(u.name)}</div></div></div></td>
             <td class="mono small">${esc(u.version || '—')}</td>
             <td>${typeCell(u)}</td>
+            <td class="small nowrap">${
+              u.released
+                ? `<span title="${esc(`${u.latest || u.version} came out ${fmtDate(u.released)}`)}">${new Date(u.released).toLocaleDateString(undefined, { dateStyle: 'medium' })}</span>`
+                : '<span class="faint">—</span>'
+            }</td>
             <td>${statusCell(u)}${u.note && u.status !== 'unknown' ? `<div class="faint small">${esc(u.note)}</div>` : ''}</td>
             <td><label class="switch" title="${u.enabled ? 'Disable' : 'Enable'}"><input type="checkbox" data-toggle="${esc(u.path)}" ${u.enabled ? 'checked' : ''}><span class="track"></span></label></td>
             <td class="actions">${
@@ -2227,9 +2232,18 @@ function FilesTab(el, ctx) {
   let cwd = pref.get(`cwd:${ctx.id}`, '');
   let entries = [];
   let editor = null;
+  // Ticked names in the current folder (cleared on moving to another), and the last one ticked, for shift-click ranges.
+  const selected = new Set();
+  let selDir = cwd;
+  let lastPick = null;
   const dlUrl = (p) => `/api/servers/${ctx.id}/files/download?path=${enc(p)}`;
 
   async function load() {
+    if (cwd !== selDir) {
+      selected.clear();
+      selDir = cwd;
+      lastPick = null;
+    }
     try {
       entries = await api('GET', `/api/servers/${ctx.id}/files?path=${enc(cwd)}`);
     } catch (err) {
@@ -2257,12 +2271,61 @@ function FilesTab(el, ctx) {
       .join('');
   }
 
+  /** Bring the tick boxes, row highlight and selection bar in line with `selected`. */
+  function syncSel() {
+    for (const box of main.querySelectorAll('[data-sel]')) {
+      const on = selected.has(entries[box.dataset.sel].name);
+      box.checked = on;
+      box.closest('tr').classList.toggle('picked', on);
+    }
+    const all = $('#f-all', main);
+    if (all) {
+      all.checked = entries.length > 0 && selected.size === entries.length;
+      all.indeterminate = selected.size > 0 && selected.size < entries.length;
+    }
+    const bar = $('#f-sel', main);
+    if (!bar) return;
+    bar.classList.toggle('hidden', !selected.size);
+    $('[data-n]', bar).textContent = `${selected.size} selected`;
+  }
+
+  async function deleteSelected() {
+    const names = entries.filter((f) => selected.has(f.name));
+    if (!names.length) return;
+    const dirs = names.filter((f) => f.dir).length;
+    const list = names.slice(0, 8).map((f) => f.name).join(', ') + (names.length > 8 ? ` and ${names.length - 8} more` : '');
+    const ok = await confirmBox(
+      `Delete ${names.length} item${names.length === 1 ? '' : 's'}?`,
+      `${list}. ${dirs ? 'Folders are deleted with everything inside them. ' : ''}This cannot be undone.`,
+      { danger: true, confirmText: 'Delete' },
+    );
+    if (!ok) return;
+    const failed = [];
+    // One at a time, so a slow disk is not hit with every delete at once and each failure can be named.
+    for (const f of names) {
+      try {
+        await api('DELETE', `/api/servers/${ctx.id}/files?path=${enc(joinPath(cwd, f.name))}`);
+        selected.delete(f.name);
+      } catch (err) {
+        failed.push(`${f.name}: ${err.message}`);
+      }
+    }
+    const done = names.length - failed.length;
+    if (done) toast(`Deleted ${done} item${done === 1 ? '' : 's'}`, 'ok');
+    if (failed.length) toast(`Could not delete ${failed.join('; ')}`, 'bad');
+    load();
+  }
+
   function renderList() {
     editor = null;
+    for (const name of selected) if (!entries.some((f) => f.name === name)) selected.delete(name);
     main.innerHTML = `
       <div class="card drop-hint" id="f-card">
         <div class="console-bar">
           <div class="crumbs">${crumbs()}</div>
+          <span class="row small hidden" id="f-sel" style="gap:8px"><span class="muted" data-n></span>
+            <button class="btn btn-sm btn-danger" data-act="delsel">${icon('trash')}Delete selected</button>
+            <button class="btn btn-sm btn-ghost" data-act="clearsel">Clear</button></span>
           <span class="spacer"></span>
           <button class="btn btn-sm" data-act="newfile">${icon('newFile')}New file</button>
           <button class="btn btn-sm" data-act="newdir">${icon('newFolder')}New folder</button>
@@ -2271,13 +2334,14 @@ function FilesTab(el, ctx) {
           <button class="icon-btn" data-act="refresh" title="Refresh">${icon('restart')}</button>
         </div>
         <div class="table-wrap"><table class="table">
-          <thead><tr><th>Name</th><th class="num">Size</th><th class="num">Modified</th><th></th></tr></thead>
+          <thead><tr><th class="pick"><input type="checkbox" id="f-all" title="Select all" ${entries.length ? '' : 'disabled'}></th><th>Name</th><th class="num">Size</th><th class="num">Modified</th><th></th></tr></thead>
           <tbody>
-            ${cwd ? `<tr><td colspan="4"><button class="file-name is-dir" data-act="up">${icon('back')}<span>Up one level</span></button></td></tr>` : ''}
+            ${cwd ? `<tr><td></td><td colspan="4"><button class="file-name is-dir" data-act="up">${icon('back')}<span>Up one level</span></button></td></tr>` : ''}
             ${entries
               .map(
                 (f, i) => `
               <tr>
+                <td class="pick"><input type="checkbox" data-sel="${i}" title="Select ${esc(f.name)}"></td>
                 <td><button class="file-name ${f.dir ? 'is-dir' : ''}" data-open="${i}">${icon(f.dir ? 'folder' : 'file')}<span>${esc(f.name)}</span></button></td>
                 <td class="num">${f.dir ? '' : fmtBytes(f.size)}</td>
                 <td class="num">${fmtDate(f.mtime)}</td>
@@ -2289,11 +2353,12 @@ function FilesTab(el, ctx) {
               </tr>`,
               )
               .join('')}
-            ${entries.length ? '' : '<tr><td colspan="4" class="muted" style="padding:28px 14px;text-align:center">This folder is empty. Drop files here to upload them.</td></tr>'}
+            ${entries.length ? '' : '<tr><td colspan="5" class="muted" style="padding:28px 14px;text-align:center">This folder is empty. Drop files here to upload them.</td></tr>'}
           </tbody>
         </table></div>
       </div>
-      <p class="faint small" style="margin-top:10px">Drag files onto the list to upload them into this folder. Edit text files (configs, logs, JSON) by clicking them.</p>`;
+      <p class="faint small" style="margin-top:10px">Drag files onto the list to upload them into this folder. Edit text files (configs, logs, JSON) by clicking them. Tick boxes to delete several at once (shift-click ticks a range).</p>`;
+    syncSel();
     $('#f-up', main).onchange = (e) => {
       uploadAll([...e.target.files]);
       e.target.value = '';
@@ -2401,6 +2466,19 @@ function FilesTab(el, ctx) {
 
   main.addEventListener('click', async (e) => {
     const t = e.target;
+    if (t.id === 'f-all') {
+      if (t.checked) for (const f of entries) selected.add(f.name);
+      else selected.clear();
+      return syncSel();
+    }
+    if (t.dataset.sel !== undefined) {
+      const i = Number(t.dataset.sel);
+      // Shift-click: give every row between the last one ticked and this one the same state.
+      const [from, to] = e.shiftKey && lastPick !== null && entries[lastPick] ? [Math.min(lastPick, i), Math.max(lastPick, i)] : [i, i];
+      for (let n = from; n <= to; n++) t.checked ? selected.add(entries[n].name) : selected.delete(entries[n].name);
+      lastPick = i;
+      return syncSel();
+    }
     const cd = t.closest('[data-cd]');
     if (cd) {
       e.preventDefault();
@@ -2452,7 +2530,11 @@ function FilesTab(el, ctx) {
       cwd = parentPath(cwd);
       load();
     } else if (act === 'refresh') load();
-    else if (act === 'fetch') {
+    else if (act === 'delsel') deleteSelected();
+    else if (act === 'clearsel') {
+      selected.clear();
+      syncSel();
+    } else if (act === 'fetch') {
       const url = await promptBox('Download from a link', `Link to a file. It is saved in /${cwd || ''}`, '', { confirmText: 'Download' });
       if (!url) return;
       toast('Downloading...', 'info');
@@ -4304,7 +4386,11 @@ function Ports(root) {
             .map(
               (r) => `
             <tr class="${r.clash ? 'clash' : ''}">
-              <td class="port">${r.port}</td>
+              <td class="port"><span class="row" style="gap:6px;flex-wrap:nowrap"><span${r.locked ? ` title="${esc(r.locked)}"` : ''}>${r.port}</span>${
+                r.locked
+                  ? ''
+                  : `<button class="icon-btn" data-edit-port="${rows.indexOf(r)}" title="Change this port">${icon('edit')}</button>`
+              }</span></td>
               <td><span class="proto">${r.proto}</span></td>
               <td>${
                 r.serverId
@@ -4331,6 +4417,24 @@ function Ports(root) {
       toast(err.message, 'bad');
     }
   }
+  async function editPort(r) {
+    const where = r.serverId ? `${r.server}: ${r.what}` : 'the WebbMC panel';
+    const value = await promptBox(`Change port for ${where}`, `New ${r.proto.toUpperCase()} port (now ${r.port})`, String(r.port), { confirmText: 'Change' });
+    if (!value || Number(value) === r.port) return;
+    if (!r.serverId && !(await confirmBox(`Move the panel to port ${value}?`, `This saves WEBMC_PORT=${value} in .env. After the panel restarts it answers on port ${value} only, so open it there.`, { confirmText: 'Move' })))
+      return;
+    try {
+      const res = await api('PUT', '/api/ports', { serverId: r.serverId, key: r.key, port: Number(value) });
+      toast(`${r.what} now uses port ${value}.${res.restart ? ` ${res.restart}` : ''}`, 'ok');
+      load();
+    } catch (err) {
+      toast(err.message, 'bad');
+    }
+  }
+  $('#ports-list', root).onclick = (e) => {
+    const b = e.target.closest('[data-edit-port]');
+    if (b && rows) editPort(rows[Number(b.dataset.editPort)]);
+  };
   q.oninput = render;
   $('#ports-refresh', root).onclick = load;
   load();
