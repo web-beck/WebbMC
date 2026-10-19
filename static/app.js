@@ -3650,40 +3650,282 @@ function PropertiesTab(el, ctx) {
     }
   }
 
-  function renderProxyHelp() {
-    const srv = ctx.srv;
-    const velocity = srv.kind === 'velocity';
-    const others = state.overview.servers.filter((x) => x.id !== srv.id && !x.proxy);
+  // ---------------------------------------------------------------- a proxy: its servers, then the rest of its config
+  let px = null; // { kind, hash, secret, data: { servers, try, forced }, saved: JSON of data }
+  let pxSettings = null;
+  const slug = (name) => name.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'server';
+  const uniqueName = (base) => {
+    let n = base;
+    for (let i = 2; px.data.servers.some((x) => x.name === n); i++) n = `${base}-${i}`;
+    return n;
+  };
+
+  function renderProxy() {
     $('#props', el).innerHTML = `
-      <div class="card panel-card stack-sm">
-        <h2>Proxy settings</h2>
-        <p class="sub">${esc(TYPE_LABEL[srv.kind])} keeps its settings in <span class="mono">${esc(srv.configFile)}</span>. Edit it in the <a href="#/server/${srv.id}/files">Files</a> tab, then restart the proxy.</p>
-        <h3>Add the servers players can reach</h3>
-        ${
-          velocity
-            ? `<p class="sub">Under <span class="mono">[servers]</span>, give each server a name and address, and list where players start in <span class="mono">try</span>:</p>
-               <pre class="code-block mono small">[servers]\nlobby = "127.0.0.1:25566"\nsurvival = "127.0.0.1:25567"\ntry = ["lobby"]</pre>`
-            : `<p class="sub">Under <span class="mono">servers:</span>, add each server, and put the first one in the listener's <span class="mono">priorities</span>:</p>
-               <pre class="code-block mono small">servers:\n  lobby:\n    address: 127.0.0.1:25566\n    motd: Lobby\n    restricted: false</pre>`
-        }
-        ${
-          others.length
-            ? `<div class="table-wrap"><table class="table"><thead><tr><th>Your servers on this machine</th><th>Address for the proxy</th></tr></thead><tbody>${others
-                .map((x) => `<tr><td>${esc(x.name)} <span class="faint small">${esc(softwareLabel(x))}</span></td><td><span class="addr">127.0.0.1:${x.port}<button type="button" data-copy="127.0.0.1:${x.port}" title="Copy">${icon('copy')}</button></span></td></tr>`)
-                .join('')}</tbody></table></div>`
-            : ''
-        }
-        <h3>Keep player accounts and skins working</h3>
-        <p class="sub">${
-          velocity
-            ? 'Set <span class="mono">player-info-forwarding-mode = "modern"</span> in velocity.toml. On each Paper server behind it, open <span class="mono">config/paper-global.yml</span> and under <span class="mono">proxies.velocity</span> set <span class="mono">enabled: true</span>, <span class="mono">online-mode: true</span> and <span class="mono">secret</span> to the text in this proxy\'s <span class="mono">forwarding.secret</span> file. Set <span class="mono">online-mode=false</span> in their server.properties.'
-            : 'Set <span class="mono">ip_forward: true</span> in config.yml. On each Spigot or Paper server behind it, set <span class="mono">settings.bungeecord: true</span> in spigot.yml and <span class="mono">online-mode=false</span> in server.properties.'
-        } Then make sure only the proxy is reachable from the internet: the servers behind it should not be.</p>
+      <div class="stack">
+        <div class="card panel-card stack-sm">
+          <div class="row" style="gap:10px"><h2>Servers behind the proxy</h2><span class="spacer"></span><span class="faint small">saved in <span class="mono">${esc(ctx.srv.configFile)}</span></span></div>
+          <p class="sub" style="margin:0">The servers players can be sent to, and where they start. Restart the proxy after saving.</p>
+          <div id="px-body"><p class="muted">Loading...</p></div>
+        </div>
+        <div id="px-settings"></div>
+        <div class="card panel-card stack-sm" id="px-help"></div>
       </div>`;
+    loadProxy();
+    pxSettings = PluginConfigTab($('#px-settings', el), ctx, { only: [ctx.srv.kind === 'velocity' ? 'velocity' : 'bungeecord'], embedded: true, onSaved: loadProxy });
   }
 
+  async function loadProxy() {
+    let r;
+    try {
+      r = await api('GET', `/api/servers/${ctx.id}/proxy`);
+    } catch (err) {
+      $('#px-body', el).innerHTML = notice(esc(err.message), 'warn');
+      return;
+    }
+    if (!r.exists) {
+      $('#px-body', el).innerHTML = notice(`<span class="mono">${esc(r.file)}</span> is written when the proxy first starts. Start it once, then add your servers here.`);
+      drawHelp(r);
+      return;
+    }
+    const data = { servers: r.servers, try: r.try, forced: r.forced || [] };
+    px = { kind: r.kind, hash: r.hash, secret: r.secret, data, saved: JSON.stringify(data) };
+    drawProxy();
+    drawHelp(r);
+  }
+
+  function drawProxy() {
+    const d = px.data;
+    const velocity = px.kind === 'velocity';
+    const others = state.overview.servers.filter((x) => x.id !== ctx.srv.id && !x.proxy);
+    const notAdded = others.filter((x) => !d.servers.some((s) => s.address === `127.0.0.1:${x.port}`));
+    const cols = velocity ? 3 : 5;
+    $('#px-body', el).innerHTML = `
+      <div class="table-wrap"><table class="table px-table">
+        <thead><tr><th>Name</th><th>Address</th>${velocity ? '' : '<th>MOTD</th><th>Restricted</th>'}<th></th></tr></thead>
+        <tbody>${
+          d.servers
+            .map(
+              (sv, i) => `<tr>
+            <td><input class="input input-sm mono" data-px="name" data-i="${i}" value="${esc(sv.name)}" aria-label="Server name" spellcheck="false" autocomplete="off"></td>
+            <td><input class="input input-sm mono" data-px="address" data-i="${i}" value="${esc(sv.address)}" placeholder="127.0.0.1:25566" list="px-local" aria-label="Address of ${esc(sv.name)}" spellcheck="false" autocomplete="off"></td>
+            ${
+              velocity
+                ? ''
+                : `<td><input class="input input-sm" data-px="motd" data-i="${i}" value="${esc(sv.motd || '')}" aria-label="MOTD of ${esc(sv.name)}"></td>
+                   <td><label class="switch" title="Only players with the bungeecord.server.${esc(sv.name)} permission can join"><input type="checkbox" data-px="restricted" data-i="${i}" ${sv.restricted ? 'checked' : ''} aria-label="${esc(sv.name)} is restricted"><span class="track"></span></label></td>`
+            }
+            <td class="actions"><button type="button" class="icon-btn danger" data-px-del="${i}" title="Remove ${esc(sv.name)}" aria-label="Remove ${esc(sv.name)}">${icon('trash')}</button></td>
+          </tr>`,
+            )
+            .join('') || `<tr><td colspan="${cols}" class="muted">No servers yet. Add one below.</td></tr>`
+        }</tbody>
+      </table></div>
+      <datalist id="px-local">${others.map((x) => `<option value="127.0.0.1:${x.port}">${esc(x.name)}</option>`).join('')}</datalist>
+      <div class="row" style="gap:8px">
+        <button type="button" class="btn btn-sm" data-px-add>${icon('plus')}Add a server</button>
+        ${
+          notAdded.length
+            ? `<select class="input input-sm" data-px-local aria-label="Add one of your servers" style="max-width:320px"><option value="">Add one of your servers...</option>${notAdded
+                .map((x) => `<option value="${esc(x.id)}">${esc(x.name)} (127.0.0.1:${x.port})</option>`)
+                .join('')}</select>`
+            : ''
+        }
+      </div>
+      <div class="cfg-group"><h4>Where players start <span class="mono faint small">${velocity ? 'try' : 'priorities'}</span></h4>
+        <p class="hint" style="margin:0 0 8px">Players join the first of these that is up. If it goes down, they are moved to the next one.</p>
+        <div id="px-order"></div>
+      </div>
+      ${
+        velocity
+          ? `<details class="cfg-sec" data-fold="px-forced" ${d.forced.length ? 'open' : ''}><summary>Forced hosts <span class="faint small">${d.forced.length}</span></summary>
+               <p class="hint" style="margin:8px 0">Players who connect with one of these addresses go straight to its servers instead of the start order (for example <span class="mono">survival.example.com</span> to survival).</p>
+               <div id="px-forced"></div></details>`
+          : ''
+      }
+      <div class="form-actions"><button type="button" class="btn btn-ghost btn-sm" data-px-undo>Undo changes</button><button type="button" class="btn btn-accent btn-sm" data-px-save>${icon('save')}Save servers</button></div>`;
+    drawOrder();
+    if (velocity) drawForced();
+    syncPx();
+  }
+
+  function drawOrder() {
+    const d = px.data;
+    const addable = d.servers.map((x) => x.name).filter((n) => n && !d.try.includes(n));
+    $('#px-order', el).innerHTML = `
+      <ol class="px-order">${
+        d.try
+          .map(
+            (n, i) => `<li><span class="num">${i + 1}</span><span class="mono">${esc(n)}</span><span class="spacer"></span>
+              <button type="button" class="icon-btn" data-px-up="${i}" ${i ? '' : 'disabled'} title="Move up" aria-label="Move ${esc(n)} up">↑</button>
+              <button type="button" class="icon-btn" data-px-down="${i}" ${i < d.try.length - 1 ? '' : 'disabled'} title="Move down" aria-label="Move ${esc(n)} down">↓</button>
+              <button type="button" class="icon-btn danger" data-px-unstart="${i}" title="Take out of the start order" aria-label="Take ${esc(n)} out of the start order">${icon('trash')}</button></li>`,
+          )
+          .join('') || '<li class="faint small">Empty: players have nowhere to go. Add a server here.</li>'
+      }</ol>
+      ${
+        addable.length
+          ? `<select class="input input-sm" data-px-start aria-label="Add to the start order" style="max-width:320px"><option value="">Add to the start order...</option>${addable
+              .map((n) => `<option>${esc(n)}</option>`)
+              .join('')}</select>`
+          : ''
+      }`;
+  }
+
+  function drawForced() {
+    const d = px.data;
+    $('#px-forced', el).innerHTML = `
+      ${d.forced
+        .map(
+          (f, i) => `<div class="row px-forced-row">
+            <input class="input input-sm mono" data-pxf="host" data-i="${i}" value="${esc(f.host)}" placeholder="survival.example.com" aria-label="Address players connect with" spellcheck="false" autocomplete="off">
+            <span class="faint small">goes to</span>
+            <input class="input input-sm mono" data-pxf="servers" data-i="${i}" value="${esc(f.servers.join(', '))}" placeholder="survival" aria-label="Servers, comma-separated" spellcheck="false" autocomplete="off">
+            <button type="button" class="icon-btn danger" data-pxf-del="${i}" title="Remove" aria-label="Remove ${esc(f.host)}">${icon('trash')}</button></div>`,
+        )
+        .join('')}
+      <button type="button" class="btn btn-sm" data-pxf-add>${icon('plus')}Add a forced host</button>`;
+  }
+
+  function syncPx() {
+    const dirty = JSON.stringify(px.data) !== px.saved;
+    $('[data-px-save]', el).disabled = !dirty;
+    $('[data-px-undo]', el).disabled = !dirty;
+  }
+
+  function drawHelp(r) {
+    const velocity = ctx.srv.kind === 'velocity';
+    $('#px-help', el).innerHTML = `
+      <h3>Keep player accounts and skins working</h3>
+      <p class="sub">${
+        velocity
+          ? 'Set <strong>Player info forwarding mode</strong> to <span class="mono">MODERN</span> in the settings above. On each Paper server behind the proxy, open <span class="mono">config/paper-global.yml</span> and under <span class="mono">proxies.velocity</span> set <span class="mono">enabled: true</span>, <span class="mono">online-mode: true</span> and <span class="mono">secret</span> to the forwarding secret below. Set <span class="mono">online-mode=false</span> in their server.properties.'
+          : 'Turn on <strong>Ip forward</strong> in the settings above. On each Spigot or Paper server behind the proxy, set <span class="mono">settings.bungeecord: true</span> in spigot.yml and <span class="mono">online-mode=false</span> in server.properties.'
+      } Then make sure only the proxy is reachable from the internet: the servers behind it should not be.</p>
+      ${
+        velocity && r.secret
+          ? `<div class="row" style="gap:10px"><span class="faint small">Forwarding secret</span><span class="addr">${esc(r.secret)}<button type="button" data-copy="${esc(r.secret)}" title="Copy">${icon('copy')}</button></span></div>`
+          : velocity
+            ? '<p class="faint small">The forwarding secret file is written when the proxy first starts.</p>'
+            : ''
+      }`;
+  }
+
+  // One set of listeners for the editor (it is drawn again often).
+  const pxAt = (e, sel) => e.target.closest(sel);
+  el.addEventListener('input', (e) => {
+    if (!px) return;
+    const f = pxAt(e, '[data-px]');
+    if (f && f.dataset.px !== 'restricted') {
+      const sv = px.data.servers[Number(f.dataset.i)];
+      if (f.dataset.px === 'name') {
+        // Renaming keeps the start order and forced hosts pointing at it.
+        const old = sv.name;
+        sv.name = f.value.trim();
+        px.data.try = px.data.try.map((n) => (n === old ? sv.name : n));
+        for (const x of px.data.forced) x.servers = x.servers.map((n) => (n === old ? sv.name : n));
+        drawOrder();
+        if (px.kind === 'velocity') {
+          // Update the forced host fields in place, keeping the focus where it is.
+          px.data.forced.forEach((x, i) => {
+            const input = $(`[data-pxf="servers"][data-i="${i}"]`, el);
+            if (input) input.value = x.servers.join(', ');
+          });
+        }
+      } else sv[f.dataset.px] = f.dataset.px === 'address' ? f.value.trim() : f.value;
+      return syncPx();
+    }
+    const ff = pxAt(e, '[data-pxf]');
+    if (ff) {
+      const x = px.data.forced[Number(ff.dataset.i)];
+      if (ff.dataset.pxf === 'host') x.host = ff.value.trim().toLowerCase();
+      else x.servers = ff.value.split(',').map((n) => n.trim()).filter(Boolean);
+      syncPx();
+    }
+  });
+  el.addEventListener('change', (e) => {
+    if (!px) return;
+    const f = pxAt(e, '[data-px="restricted"]');
+    if (f) {
+      px.data.servers[Number(f.dataset.i)].restricted = f.checked;
+      return syncPx();
+    }
+    const local = pxAt(e, '[data-px-local]');
+    if (local?.value) {
+      const x = state.overview.servers.find((v) => v.id === local.value);
+      const name = uniqueName(slug(x.name));
+      px.data.servers.push({ name, address: `127.0.0.1:${x.port}`, motd: '', restricted: false });
+      if (!px.data.try.length) px.data.try.push(name); // the first server is where players start
+      return drawProxy();
+    }
+    const start = pxAt(e, '[data-px-start]');
+    if (start?.value) {
+      px.data.try.push(start.value);
+      drawOrder();
+      syncPx();
+    }
+  });
+  el.addEventListener('click', async (e) => {
+    if (!px) return;
+    if (pxAt(e, '[data-px-add]')) {
+      px.data.servers.push({ name: uniqueName('server'), address: '', motd: '', restricted: false });
+      drawProxy();
+      return $(`[data-px="name"][data-i="${px.data.servers.length - 1}"]`, el)?.select();
+    }
+    const del = pxAt(e, '[data-px-del]');
+    if (del) {
+      const [gone] = px.data.servers.splice(Number(del.dataset.pxDel), 1);
+      px.data.try = px.data.try.filter((n) => n !== gone.name);
+      for (const x of px.data.forced) x.servers = x.servers.filter((n) => n !== gone.name);
+      return drawProxy();
+    }
+    const move = pxAt(e, '[data-px-up], [data-px-down], [data-px-unstart]');
+    if (move) {
+      const t = px.data.try;
+      if (move.dataset.pxUnstart !== undefined) t.splice(Number(move.dataset.pxUnstart), 1);
+      else {
+        const i = Number(move.dataset.pxUp ?? move.dataset.pxDown);
+        const j = move.dataset.pxUp !== undefined ? i - 1 : i + 1;
+        [t[i], t[j]] = [t[j], t[i]];
+      }
+      drawOrder();
+      return syncPx();
+    }
+    if (pxAt(e, '[data-pxf-add]')) {
+      px.data.forced.push({ host: '', servers: px.data.try.slice(0, 1) });
+      drawForced();
+      syncPx();
+      return $(`[data-pxf="host"][data-i="${px.data.forced.length - 1}"]`, el)?.focus();
+    }
+    const fdel = pxAt(e, '[data-pxf-del]');
+    if (fdel) {
+      px.data.forced.splice(Number(fdel.dataset.pxfDel), 1);
+      drawForced();
+      return syncPx();
+    }
+    if (pxAt(e, '[data-px-undo]')) {
+      px.data = JSON.parse(px.saved);
+      return drawProxy();
+    }
+    const save = pxAt(e, '[data-px-save]');
+    if (save) {
+      save.disabled = true;
+      try {
+        const r = await api('PUT', `/api/servers/${ctx.id}/proxy`, { hash: px.hash, ...px.data });
+        const data = { servers: r.servers, try: r.try, forced: r.forced || [] };
+        px = { kind: r.kind, hash: r.hash, secret: r.secret, data, saved: JSON.stringify(data) };
+        drawProxy();
+        toast(ctx.srv.pid ? 'Servers saved. Restart the proxy to use them.' : 'Servers saved', 'ok');
+        pxSettings?.reload(); // the same file changed under the settings below
+      } catch (err) {
+        toast(err.message, 'bad');
+        syncPx();
+      }
+    }
+  });
+
   function loadProps() {
-    if (ctx.srv.proxy) return renderProxyHelp();
+    if (ctx.srv.proxy) return renderProxy();
     api('GET', `/api/servers/${ctx.id}/properties`)
       .then((r) => {
         props = r.values;
@@ -4408,7 +4650,11 @@ const humanKey = (k) => {
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
 
-function PluginConfigTab(el, ctx) {
+/**
+ * opts.only: show just these entries (ids). opts.embedded: no intro, cards open (the proxy's Properties tab uses it
+ * for the rest of velocity.toml / config.yml). opts.onSaved: called after a save. Returns { reload }.
+ */
+function PluginConfigTab(el, ctx, opts = {}) {
   const sid = ctx.id;
   let data = null;
   const files = new Map(); // path -> { file, byLine }
@@ -4418,7 +4664,7 @@ function PluginConfigTab(el, ctx) {
   let uid = 0;
   el.innerHTML = '<div class="card panel-card"><p class="muted">Loading...</p></div>';
 
-  const isOpen = (k) => (opened.has(k) ? 'open' : '');
+  const isOpen = (k) => (opened.has(k) || (opts.embedded && k.startsWith('p:')) ? 'open' : '');
   const noteHtml = (note) => {
     if (!note) return '';
     const [first, ...rest] = note.split('\n');
@@ -4455,7 +4701,7 @@ function PluginConfigTab(el, ctx) {
     const rootNode = { children: [] };
     const nodes = new Map([['', rootNode]]);
     for (const it of file.items) {
-      if (skip.has(it.line)) continue;
+      if (skip.has(it.line) || p.hide?.includes(it.path[0])) continue; // edited elsewhere (a proxy's servers, its port)
       const parent = nodes.get(it.path.slice(0, -1).join('\u0000')) || rootNode;
       if (it.kind === 'section') {
         const node = { it, children: [] };
@@ -4642,8 +4888,15 @@ function PluginConfigTab(el, ctx) {
   }
 
   function render() {
-    const installed = data.filter((p) => p.installed);
-    const missing = data.filter((p) => !p.installed);
+    // Proxies' own settings live in their Properties tab, not here.
+    const list = opts.only ? data.filter((p) => opts.only.includes(p.id)) : data.filter((p) => !p.proxy);
+    const installed = list.filter((p) => p.installed);
+    const missing = list.filter((p) => !p.installed);
+    if (opts.embedded) {
+      el.innerHTML = `<div class="stack">${installed.map((p) => `<div data-plugin="${p.id}"></div>`).join('')}</div>`;
+      for (const p of installed) drawPlugin(p);
+      return;
+    }
     el.innerHTML = `
       <div class="stack">
         <div class="row section-head" style="margin:0"><p class="sub" style="margin:0">Settings of the plugins below, saved straight to their config files (comments and everything else in them stay as they are). Most plugins read them when the server starts, so restart it after saving.</p>
@@ -4701,7 +4954,8 @@ function PluginConfigTab(el, ctx) {
     }
     remember(p);
     drawPlugin(p);
-    if (ok) toast(`${p.name} settings saved.${ctx.srv.pid ? ' Restart the server (or reload the plugin) to use them.' : ''}`, 'ok');
+    if (ok) toast(`${p.name} saved.${ctx.srv.pid ? ' Restart the server (or reload the plugin) to use them.' : ''}`, 'ok');
+    if (ok) opts.onSaved?.();
   }
 
   // Folding is remembered per server, in this browser. ('toggle' does not bubble, so listen while it travels down.)
@@ -4767,7 +5021,7 @@ function PluginConfigTab(el, ctx) {
   });
 
   load();
-  return {};
+  return { reload: load };
 }
 
 const TAB_VIEWS = {

@@ -32,6 +32,7 @@ const serverIcon = require('./lib/icon');
 const mcstatus = require('./lib/mcstatus');
 const motd = require('./lib/motd');
 const pluginconfig = require('./lib/pluginconfig');
+const proxycfg = require('./lib/proxycfg');
 const playit = require('./lib/playit');
 const java = require('./lib/java');
 const ports = require('./lib/ports');
@@ -271,6 +272,13 @@ route('GET', '/api/servers/:id/properties', ({ inst }) => {
 });
 // MOTD in the editor's & syntax, converted to the server type's own file and format
 route('GET', '/api/servers/:id/motd', ({ inst }) => motd.read(inst.cfg));
+// A proxy's servers, start order and forced hosts (Properties tab of a Velocity or BungeeCord server).
+route('GET', '/api/servers/:id/proxy', ({ inst }) => proxycfg.read(inst));
+route('PUT', '/api/servers/:id/proxy', async ({ inst, body }) => {
+  const r = await proxycfg.save(inst, body || {});
+  if (r.changed) store.logActivity(inst.id, `Proxy servers changed in ${r.file}`);
+  return r;
+});
 // The Plugin config tab: settings of Geyser, MCXboxBroadcast, DiscordSRV, MiniMOTD, TAB and BlueMap.
 route('GET', '/api/servers/:id/plugin-config', ({ inst }) => pluginconfig.view(inst));
 route('PUT', '/api/servers/:id/plugin-config', async ({ inst, body }) => {
