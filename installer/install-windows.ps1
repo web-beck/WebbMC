@@ -1,27 +1,35 @@
-# WebbMC installer for Windows.
+# WebbMC installer for Windows: what WebbMC-Setup.exe runs (it carries a copy of this file, so build the exe again
+# after changing it; see WebbMC-Setup.cs). People use the exe; this file is not handed out on its own.
 #
-# Open PowerShell and run:
+# It installs Node.js and Git with winget when they are missing, downloads WebbMC, writes .env, creates the admin
+# account, makes a start-webbmc.bat with desktop and startup shortcuts, and starts the panel. Pointed at an existing
+# WebbMC folder, it updates it. Run by hand (powershell -ExecutionPolicy Bypass -File installer\install-windows.ps1)
+# it asks its questions in the terminal.
 #
-#   irm https://raw.githubusercontent.com/web-beck/WebbMC/main/install-windows.ps1 | iex
-#
-# It asks a few questions (folder, version, port, admin account, start with Windows), installs Node.js and Git with
-# winget when they are missing, downloads WebbMC, writes .env, creates the admin account, makes a start-webbmc.bat
-# with desktop and startup shortcuts, and starts the panel. Run the same line again later to update WebbMC.
+# Without questions (the exe uses this): set WEBBMC_YES=1 and the answers in WEBBMC_DIR, WEBBMC_BRANCH
+# (main or dev), WEBBMC_PORT, WEBBMC_ADMIN, WEBBMC_ATLOGIN (1 or 0) and WEBBMC_START (1 or 0). A wrong answer is then
+# an error instead of a question, and the exit code is 1 when the install failed.
 #
 # (Everything is in one function so a problem ends the installer, not the PowerShell window it runs in.)
 
 function Install-WebbMC {
   $ErrorActionPreference = 'Stop'
   $Repo = 'https://github.com/web-beck/WebbMC.git'
+  $Quiet = $env:WEBBMC_YES -eq '1'
+  function Pick($envValue, $default) { if ($envValue) { return $envValue }; return $default }
+  # A wrong answer: asked again, or without questions, the end of the install.
+  function Bad($text) { if ($Quiet) { throw $text }; Write-Host "  $text" }
 
   function Say($text) { Write-Host ''; Write-Host "==> $text" -ForegroundColor Green }
   function Note($text) { Write-Host "  $text" -ForegroundColor DarkGray }
   function Ask($question, $default) {
+    if ($Quiet) { return $default }
     $answer = Read-Host "  $question [$default]"
     if ([string]::IsNullOrWhiteSpace($answer)) { return $default }
     return $answer.Trim()
   }
   function YesNo($question, $default) {
+    if ($Quiet) { return $default }
     while ($true) {
       $hint = 'y/N'
       if ($default) { $hint = 'Y/n' }
@@ -73,11 +81,11 @@ function Install-WebbMC {
   Write-Host 'WebbMC installer for Windows' -ForegroundColor White
 
   # ---- Where -----------------------------------------------------------------------------------------------
-  # Run from inside a WebbMC folder (install-windows.ps1 next to server.js): that folder. Otherwise ask.
+  # Run from a WebbMC folder's installer\ folder: that WebbMC folder. Otherwise ask.
   $Dir = $null
-  if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'server.js'))) { $Dir = $PSScriptRoot }
+  if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot '..\server.js'))) { $Dir = Split-Path $PSScriptRoot -Parent }
   if (-not $Dir) {
-    $Dir = Ask 'Install WebbMC in which folder?' (Join-Path $HOME 'WebbMC')
+    $Dir = Ask 'Install WebbMC in which folder?' (Pick $env:WEBBMC_DIR (Join-Path $HOME 'WebbMC'))
   }
   $Dir = [IO.Path]::GetFullPath($Dir)
   $Update = Test-Path (Join-Path $Dir '.git')
@@ -92,30 +100,30 @@ function Install-WebbMC {
   $Branch = 'main'
   $AtLogin = $true
   if (-not $Update) {
-    Note 'Press Enter to accept the answer in [brackets].'
+    if (-not $Quiet) { Note 'Press Enter to accept the answer in [brackets].' }
     Write-Host ''
     Write-Host '  Version: 1) main  stable, recommended   2) dev  newest features, can break'
     while ($true) {
-      $pick = Ask 'Choose 1 or 2' '1'
+      $pick = Ask 'Choose 1 or 2' (Pick $env:WEBBMC_BRANCH '1')
       if ($pick -in @('1', 'main')) { $Branch = 'main'; break }
       if ($pick -in @('2', 'dev')) { $Branch = 'dev'; break }
-      Write-Host '  Type 1 or 2.'
+      Bad 'Type 1 or 2.'
     }
     while ($true) {
-      $p = Ask 'Web app port (you open the panel at http://localhost:PORT)' '8420'
+      $p = Ask 'Web app port (you open the panel at http://localhost:PORT)' (Pick $env:WEBBMC_PORT '8420')
       $n = 0
-      if (-not [int]::TryParse($p, [ref]$n) -or $n -lt 1 -or $n -gt 65535) { Write-Host '  Type a number from 1 to 65535.'; continue }
-      if ($n -eq 25565) { Write-Host "  25565 is Minecraft's port. Pick another, such as 8420."; continue }
-      if (PortUsed $n) { Write-Host "  Something already uses port $n. Pick another."; continue }
+      if (-not [int]::TryParse($p, [ref]$n) -or $n -lt 1 -or $n -gt 65535) { Bad 'The port must be a number from 1 to 65535.'; continue }
+      if ($n -eq 25565) { Bad "25565 is Minecraft's port. Pick another, such as 8420."; continue }
+      if (PortUsed $n) { Bad "Something already uses port $n. Pick another."; continue }
       $Port = $n
       break
     }
     while ($true) {
-      $Admin = Ask 'Admin username' 'admin'
+      $Admin = Ask 'Admin username' (Pick $env:WEBBMC_ADMIN 'admin')
       if ($Admin -match '^[A-Za-z0-9_.-]{3,24}$') { break }
-      Write-Host '  3 to 24 letters, digits, dots, dashes or underscores.'
+      Bad 'The admin username must be 3 to 24 letters, digits, dots, dashes or underscores.'
     }
-    $AtLogin = YesNo 'Start WebbMC when you sign in to Windows?' $true
+    $AtLogin = YesNo 'Start WebbMC when you sign in to Windows?' ($env:WEBBMC_ATLOGIN -ne '0')
     Write-Host ''
     Write-Host "  Folder:  $Dir"
     Write-Host "  Version: $Branch    Port: $Port    Admin: $Admin    Start with Windows: $AtLogin"
@@ -192,19 +200,19 @@ function Install-WebbMC {
   Write-Host ''
   Write-Host '  Start it:  double-click "WebbMC" on your desktop (or start-webbmc.bat in the folder)'
   Write-Host '  Stop it:   press Ctrl+C in its window. Do not close the window with the X: that can leave Minecraft running.'
-  Write-Host '  Update:    run the same install line again, or use the bell in the panel'
+  Write-Host '  Update:    run WebbMC-Setup.exe again and pick this folder, or use the bell in the panel'
   if ($Update) {
     Note 'If WebbMC is running, stop it with Ctrl+C in its window and start it again to use the update.'
     return
   }
-  if (YesNo 'Start WebbMC now?' $true) {
+  if (YesNo 'Start WebbMC now?' ($env:WEBBMC_START -ne '0')) {
     Start-Process -FilePath $bat -WorkingDirectory $Dir
     Write-Host -NoNewline '  Waiting for the panel'
     for ($i = 0; $i -lt 45; $i++) {
       try {
         Invoke-WebRequest "http://127.0.0.1:$Port/api/health" -UseBasicParsing -TimeoutSec 2 | Out-Null
         Write-Host ' running.'
-        Start-Process "http://localhost:$Port"
+        if (-not $Quiet) { Start-Process "http://localhost:$Port" } # the setup window has its own Open button
         return
       } catch { Write-Host -NoNewline '.'; Start-Sleep -Seconds 1 }
     }
@@ -213,4 +221,8 @@ function Install-WebbMC {
   }
 }
 
-try { Install-WebbMC } catch { Write-Host ''; Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red }
+try { Install-WebbMC } catch {
+  Write-Host ''
+  Write-Host "Error: $($_.Exception.Message)" -ForegroundColor Red
+  if ($env:WEBBMC_YES -eq '1') { exit 1 }
+}

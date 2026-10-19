@@ -17,16 +17,10 @@ You need **Node.js 20.12 or newer** (22 LTS recommended) and **Git**. That's all
 
 **Download [WebbMC-Setup.exe](https://github.com/web-beck/WebbMC/raw/main/installer/WebbMC-Setup.exe) and double-click it.** Windows may say *"Windows protected your PC"* because the file isn't signed: choose **More info → Run anyway**.
 
-Or open **PowerShell** (Start menu, type `powershell`) and paste this line, which does the same:
-
-```powershell
-irm https://raw.githubusercontent.com/web-beck/WebbMC/main/install-windows.ps1 | iex
-```
-
-It asks a few questions (press Enter for the default in brackets):
+Setup asks for:
 
 - **Folder** (`C:\Users\you\WebbMC`)
-- **Version:** `main` (stable) or `dev`
+- **Version:** stable or development
 - **Panel port** (8420)
 - **Admin username**
 - **Start with Windows:** whether WebbMC starts when you sign in
@@ -39,7 +33,7 @@ Then it does the rest:
 4. Puts a **WebbMC** shortcut on your desktop.
 5. Starts the panel and opens **http://localhost:8420** in your browser.
 
-Afterwards, start WebbMC with the desktop shortcut, and stop it with **Ctrl+C** in its window, which stops every Minecraft server cleanly first. Don't close the window with the X. **Run the same line again to update.**
+Afterwards, start WebbMC with the desktop shortcut, and stop it with **Ctrl+C** in its window, which stops every Minecraft server cleanly first. Don't close the window with the X. **To update, run WebbMC-Setup.exe again and pick the same folder** (or use the bell in the panel).
 
 <details><summary>Install by hand instead</summary>
 
