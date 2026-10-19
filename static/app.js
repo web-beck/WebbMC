@@ -1717,6 +1717,14 @@ function AddonsTab(el, ctx) {
     badge.classList.toggle('hidden', !n);
     badge.title = n ? `${n} update${n === 1 ? '' : 's'} available` : '';
   };
+  // What the installed file is built for; flagged when this server cannot load that type.
+  const typeCell = (u) => {
+    if (!u.builtFor) return '<span class="faint small" title="Could not tell what this file is built for">—</span>';
+    const all = u.types.length > 1 ? `Built for ${u.types.join(', ')}` : `Built for ${u.builtFor}`;
+    return u.fits
+      ? `<span class="tag plain" title="${esc(all)}">${esc(u.builtFor)}</span>`
+      : `<span class="tag warn" title="${esc(`${all}, which this server cannot load`)}">${esc(u.builtFor)}</span>`;
+  };
   const statusCell = (u) => {
     if (u.status === 'update' && u.switchTo)
       return `<span class="pill warn" title="This file is built for another server type; ${esc(u.switchTo)} has its own build of the same release"><span class="dot warn"></span>${esc(u.switchTo)} build: ${esc(u.latest)}</span>`;
@@ -1756,7 +1764,7 @@ function AddonsTab(el, ctx) {
         ? '<span class="pill ok"><span class="dot ok"></span>Everything is up to date</span>'
         : '';
     $('#up-list', el).innerHTML = updates.length
-      ? `<table class="table"><thead><tr><th>${esc(what()[0].toUpperCase() + what().slice(1))}</th><th>Installed</th><th>Status</th><th>On</th><th></th></tr></thead><tbody>${updates
+      ? `<table class="table"><thead><tr><th>${esc(what()[0].toUpperCase() + what().slice(1))}</th><th>Installed</th><th>Type</th><th>Status</th><th>On</th><th></th></tr></thead><tbody>${updates
           .map(
             (u, i) => `<tr>
             <td><div class="row" style="gap:10px;flex-wrap:nowrap">${
@@ -1765,6 +1773,7 @@ function AddonsTab(el, ctx) {
               u.datapack ? '<span class="tag">datapack</span>' : ''
             }</div><div class="mono faint small ellipsis">${esc(u.name)}</div></div></div></td>
             <td class="mono small">${esc(u.version || '—')}</td>
+            <td>${typeCell(u)}</td>
             <td>${statusCell(u)}${u.note && u.status !== 'unknown' ? `<div class="faint small">${esc(u.note)}</div>` : ''}</td>
             <td><label class="switch" title="${u.enabled ? 'Disable' : 'Enable'}"><input type="checkbox" data-toggle="${esc(u.path)}" ${u.enabled ? 'checked' : ''}><span class="track"></span></label></td>
             <td class="actions">${

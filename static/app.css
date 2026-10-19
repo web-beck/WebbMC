@@ -565,6 +565,7 @@ pre.raw { margin: 12px 0 0; padding: 14px; max-height: 420px; overflow: auto; bo
 /* plugin sources */
 .input.a-ver { width: auto; min-width: 200px; max-width: 100%; }
 .tag.warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.tag.plain { background: var(--surface-3); color: var(--muted); }
 .addon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); gap: 12px; margin-top: 14px; }
 .addon-hit { display: flex; gap: 12px; align-items: flex-start; padding: 12px; background: var(--surface-2); }
 .addon-hit .body { flex: 1; min-width: 0; display: grid; gap: 2px; }
