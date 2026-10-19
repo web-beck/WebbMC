@@ -23,6 +23,26 @@ You do **not** need to install Java. When you create a server, WebbMC downloads 
 
 ## Windows
 
+### Quick install with the script
+
+Open **PowerShell** (Start menu, type `powershell`) and paste:
+
+```powershell
+irm https://raw.githubusercontent.com/web-beck/WebbMC/main/install-windows.ps1 | iex
+```
+
+It asks for the folder, version (`main` or `dev`), port, admin username and whether to start WebbMC when you sign in to Windows. Then it:
+
+1. Installs Node.js and Git with `winget` when they're missing.
+2. Downloads WebbMC and writes `.env`.
+3. Creates the admin account and prints its **one-time password**.
+4. Makes `start-webbmc.bat` and a **WebbMC** shortcut on your desktop (and in Startup, if you chose to start with Windows).
+5. Starts the panel and opens it in your browser.
+
+Run the same line again to update. Then skip to [First sign-in and first server](#first-sign-in-and-first-server).
+
+To do it by hand instead, follow the steps below.
+
 ### 1. Install Node.js and Git
 
 Open **PowerShell** (Start menu, type `powershell`) and run:

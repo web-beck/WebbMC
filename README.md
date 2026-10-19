@@ -15,25 +15,47 @@ You need **Node.js 20.12 or newer** (22 LTS recommended) and **Git**. That's all
 
 ### Windows
 
-Open **PowerShell** and run:
+**Download [WebbMC-Setup.exe](https://github.com/web-beck/WebbMC/raw/main/installer/WebbMC-Setup.exe) and double-click it.** Windows may say *"Windows protected your PC"* because the file isn't signed: choose **More info → Run anyway**.
+
+Or open **PowerShell** (Start menu, type `powershell`) and paste this line, which does the same:
+
+```powershell
+irm https://raw.githubusercontent.com/web-beck/WebbMC/main/install-windows.ps1 | iex
+```
+
+It asks a few questions (press Enter for the default in brackets):
+
+- **Folder** (`C:\Users\you\WebbMC`)
+- **Version:** `main` (stable) or `dev`
+- **Panel port** (8420)
+- **Admin username**
+- **Start with Windows:** whether WebbMC starts when you sign in
+
+Then it does the rest:
+
+1. Installs **Node.js** and **Git** with `winget` when they're missing.
+2. Downloads WebbMC.
+3. Creates the admin account and prints its **one-time password**.
+4. Puts a **WebbMC** shortcut on your desktop.
+5. Starts the panel and opens **http://localhost:8420** in your browser.
+
+Afterwards, start WebbMC with the desktop shortcut, and stop it with **Ctrl+C** in its window, which stops every Minecraft server cleanly first. Don't close the window with the X. **Run the same line again to update.**
+
+<details><summary>Install by hand instead</summary>
 
 ```powershell
 winget install OpenJS.NodeJS.LTS
 winget install Git.Git
-```
-
-Close PowerShell and open a new one, then:
-
-```powershell
+# close PowerShell and open a new one, then:
 cd $HOME
 git clone https://github.com/web-beck/WebbMC.git
 cd WebbMC
 node server.js
 ```
 
-Open **http://localhost:8420** in your browser. Stop the panel with **Ctrl+C** in that window, which stops every Minecraft server cleanly first. Don't close the window with the X.
+No `winget`? Install [Node.js](https://nodejs.org/) (LTS) and [Git](https://git-scm.com/download/win) from their websites. More in [initial-startup.md](initial-startup.md#windows).
 
-No `winget`? Install [Node.js](https://nodejs.org/) (LTS) and [Git](https://git-scm.com/download/win) from their websites instead. To start WebbMC when you sign in to Windows, see [initial-startup.md](initial-startup.md#5-optional-start-webbmc-when-you-sign-in-to-windows).
+</details>
 
 ### Linux
 
@@ -69,7 +91,7 @@ There's a `Dockerfile` (Node.js plus Java 25, 21 and 17) and a `railway.json`. S
 
 ### First sign-in
 
-1. **Create your account** on the sign-in page. The first account on a new panel becomes the **admin**, so do this straight away. If you used the Linux installer, sign in with the one-time password it printed instead.
+1. **Create your account** on the sign-in page. The first account on a new panel becomes the **admin**, so do this straight away. If you used one of the installers, sign in with the one-time password it printed instead.
 2. **New server:** pick the software (Paper is a good default), the Minecraft version and the RAM, accept the Minecraft EULA and press **Create server**. WebbMC downloads the server jar and the right Java.
 3. **Start** it. When the console prints `Done`, join from Minecraft at `localhost`.
 

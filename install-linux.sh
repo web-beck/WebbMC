@@ -144,7 +144,7 @@ EOF
     if [[ $ans == y* ]]; then printf -v "$1" 1; else printf -v "$1" 0; fi
   }
 
-  [[ $(uname -s) == Linux ]] || die "This installer is for Linux. On Windows, follow initial-startup.md."
+  [[ $(uname -s) == Linux ]] || die "This installer is for Linux. On Windows, use install-windows.ps1 (see README.md)."
 
   # ---- Where and as whom ----------------------------------------------------------------------------------
   local DIR SELF=''
