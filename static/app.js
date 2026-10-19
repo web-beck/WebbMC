@@ -4096,7 +4096,7 @@ function ServerSettingsTab(el, ctx) {
         <div><h2>General</h2><p class="sub" style="margin:4px 0 0">Launch options. Changes apply on the next start.</p></div>
         <div class="form-grid">
           <div class="field"><label>Name</label><input class="input" name="name" value="${esc(s.name)}" maxlength="64"></div>
-          <div class="field"><label>Server jar</label><input class="input mono" name="jar" value="${esc(s.jar)}"><span class="hint">Relative to the server folder.</span></div>
+          <div class="field"><label for="ss-jar">Server jar</label><input class="input mono" id="ss-jar" name="jar" value="${esc(s.jar)}" spellcheck="false" autocomplete="off"><span class="hint">The jar that is started, relative to the server folder. Renaming it here renames the file, and new versions are downloaded under this name.</span></div>
           ${
             me().admin
               ? `<div class="field"><label>Owner</label><input class="input" name="owner" list="user-list" value="${esc(s.owner || '')}" placeholder="Admins only" autocomplete="off" spellcheck="false"><span class="hint">The account (email or username) that manages this server. Empty means only admins.</span></div>`
@@ -4131,11 +4131,11 @@ function ServerSettingsTab(el, ctx) {
       </form>
 
       <form class="card panel-card form" id="ss-soft">
-        <div><h2>Software</h2><p class="sub" style="margin:4px 0 0">The server jar: what is installed, and whether a newer build is out. Updating replaces server.jar; worlds, plugins and configs stay.</p></div>
+        <div><h2>Software</h2><p class="sub" style="margin:4px 0 0">The server jar: what is installed, and whether a newer build is out. Updating replaces <span class="mono">${esc(s.jar)}</span>; worlds, plugins and configs stay.</p></div>
         <div class="soft-status" id="ss-status"><p class="muted row"><span class="spin"></span>Checking for updates...</p></div>
         <details class="soft-other">
           <summary>Install another version or software</summary>
-          <p class="hint" style="margin:8px 0 12px">This replaces server.jar. Make a backup first: worlds cannot be moved back to an older Minecraft version.</p>
+          <p class="hint" style="margin:8px 0 12px">This replaces <span class="mono">${esc(s.jar)}</span>. Make a backup first: worlds cannot be moved back to an older Minecraft version.</p>
           <div class="form-grid">
             <div class="field"><label>Software</label><select class="input" name="type">${DOWNLOADABLE.map(
               (t) => `<option value="${t}" ${t === s.type ? 'selected' : ''}>${TYPE_LABEL[t]}</option>`,
@@ -4270,7 +4270,7 @@ function ServerSettingsTab(el, ctx) {
     e.preventDefault();
     const type = soft.elements.type.value;
     const version = versionSel.value;
-    if (version) install(type, version, `Install ${TYPE_LABEL[type]} ${version}?`, 'server.jar will be replaced. Your worlds, plugins and configs stay in place.');
+    if (version) install(type, version, `Install ${TYPE_LABEL[type]} ${version}?`, `${s.jar} will be replaced. Your worlds, plugins and configs stay in place.`);
   };
 
   // What is installed against the newest build of the same version, and any newer Minecraft version.
@@ -4302,14 +4302,14 @@ function ServerSettingsTab(el, ctx) {
     .catch((err) => ($('#ss-status', el).innerHTML = `<p class="faint small" style="margin:0">Could not check for updates: ${esc(err.message)}</p>`));
   $('#ss-status', el).addEventListener('click', (e) => {
     if (e.target.closest('[data-soft-update]'))
-      return install(s.type, s.version, `Update ${softName}?`, 'server.jar is replaced with the newest build of the same version. Your worlds, plugins and configs stay in place.');
+      return install(s.type, s.version, `Update ${softName}?`, `${s.jar} is replaced with the newest build of the same version. Your worlds, plugins and configs stay in place.`);
     const v = e.target.closest('[data-soft-version]')?.dataset.softVersion;
     if (v)
       install(
         s.type,
         v,
         `Move to ${TYPE_LABEL[s.type] || s.type} ${v}?`,
-        `server.jar is replaced with ${v}. Make a backup first: once the world has been opened in ${v} it cannot go back to ${s.version}. Check that your plugins support ${v}.`,
+        `${s.jar} is replaced with ${v}. Make a backup first: once the world has been opened in ${v} it cannot go back to ${s.version}. Check that your plugins support ${v}.`,
       );
   });
 
