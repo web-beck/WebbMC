@@ -31,6 +31,7 @@ const addons = require('./lib/addons');
 const serverIcon = require('./lib/icon');
 const mcstatus = require('./lib/mcstatus');
 const motd = require('./lib/motd');
+const pluginconfig = require('./lib/pluginconfig');
 const playit = require('./lib/playit');
 const java = require('./lib/java');
 const ports = require('./lib/ports');
@@ -223,6 +224,19 @@ route('GET', '/api/servers/:id/java', ({ inst }) => java.plan(inst.cfg));
 route('GET', '/api/servers/:id/metrics', ({ inst }) => ({ history: inst.history, stats: inst.stats }));
 route('GET', '/api/servers/:id/size', async ({ inst }) => ({ bytes: await files.dirSize(inst.dir) }));
 
+route('GET', '/api/servers/:id/software', ({ inst }) => providers.status(inst.cfg));
+// The game port, from the Settings tab: the same checks and files as the Ports page.
+route('PUT', '/api/servers/:id/port', async ({ inst, user, body }) => {
+  try {
+    const r = await ports.setPort(manager.all(), PORT, { serverId: inst.id, key: 'game', port: body?.port });
+    if (r.changed) store.logActivity(inst.id, `${user.id || 'An admin'} moved ${r.row.what} from port ${r.from} to ${r.port} (${r.file})`);
+    return { changed: r.changed, restart: r.restart || null };
+  } catch (err) {
+    // Other people's servers are not named to someone who cannot see them.
+    if (!user.admin && /already set for/.test(err.message)) throw httpError(409, `Port ${Number(body?.port)} is already used by another server on this panel. Pick another.`);
+    throw err;
+  }
+});
 route('POST', '/api/servers/:id/install', ({ inst, body }) => {
   if (!providers.TYPES.includes(body.type)) throw httpError(400, 'Pick the server software');
   if (!body.version) throw httpError(400, 'Pick a version');
@@ -257,6 +271,13 @@ route('GET', '/api/servers/:id/properties', ({ inst }) => {
 });
 // MOTD in the editor's & syntax, converted to the server type's own file and format
 route('GET', '/api/servers/:id/motd', ({ inst }) => motd.read(inst.cfg));
+// The Plugin config tab: settings of Geyser, MCXboxBroadcast, DiscordSRV, MiniMOTD, TAB and BlueMap.
+route('GET', '/api/servers/:id/plugin-config', ({ inst }) => pluginconfig.view(inst));
+route('PUT', '/api/servers/:id/plugin-config', async ({ inst, body }) => {
+  const r = await pluginconfig.save(inst, body || {});
+  if (r.changed) store.logActivity(inst.id, `${r.plugin} settings changed in ${r.file.path}`);
+  return r;
+});
 route('PUT', '/api/servers/:id/motd', ({ inst, body }) => {
   const result = motd.write(inst.cfg, body.text);
   store.logActivity(inst.id, `MOTD updated in ${result.file}`);

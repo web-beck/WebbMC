@@ -1485,6 +1485,7 @@ const TABS = [
   ['metrics', 'Metrics', 'chart'],
   ['players', 'Players', 'people'],
   ['addons', 'Plugins', 'puzzle'],
+  ['pluginconfig', 'Plugin config', 'edit'],
   ['files', 'Files', 'folder'],
   ['properties', 'Properties', 'tune'],
   ['backups', 'Backups', 'archive'],
@@ -3203,6 +3204,131 @@ const MOTD_TEMPLATES = [
   { id: 'plain', name: 'Plain', make: (n) => [n, ''] },
 ];
 
+/**
+ * The MOTD editor: two lines in & codes, with color swatches, formats, hex colors and gradients (when `hex`),
+ * centering, templates and a width meter per line. onInput(lines) runs on every change. Used for the server's own
+ * MOTD (Properties) and for MiniMOTD's (Plugin config). Returns { set(lines) }.
+ */
+function motdEditor(box, { lines: start, hex, name = '', onInput = () => {} }) {
+  let lines = [...start, ''].slice(0, 2);
+  let focused = 0; // the line the toolbar acts on
+  box.innerHTML = `
+    <div class="motd-tools">
+      <div class="swatches" role="group" aria-label="Colors">${Object.entries(MC_HEX)
+        .map(([c, h]) => `<button type="button" class="swatch" data-code="${c}" style="background:${h}" title="${MC_COLOR_NAMES[c]} (&amp;${c})" aria-label="${MC_COLOR_NAMES[c]}"></button>`)
+        .join('')}</div>
+      <div class="row motd-row">
+        <div class="seg fmt" role="group" aria-label="Formatting">
+          <button type="button" data-code="l" title="Bold (&amp;l)"><b>B</b></button>
+          <button type="button" data-code="o" title="Italic (&amp;o)"><i>I</i></button>
+          <button type="button" data-code="n" title="Underline (&amp;n)"><u>U</u></button>
+          <button type="button" data-code="m" title="Strikethrough (&amp;m)"><s>S</s></button>
+          <button type="button" data-code="k" title="Obfuscated, flickering text (&amp;k)">?!</button>
+          <button type="button" data-code="r" title="Reset to plain gray (&amp;r)">Reset</button>
+        </div>
+        <label class="hexpick ${hex ? '' : 'off'}" title="${hex ? 'Any color (&amp;#rrggbb)' : 'This server type shows only the 16 colors above'}"><input type="color" data-m="hex" value="#ff8800" ${hex ? '' : 'disabled'}><span>Hex</span></label>
+        <button type="button" class="btn btn-sm" data-m="grad-toggle" ${hex ? '' : 'disabled title="This server type shows only the 16 standard colors"'}>Gradient</button>
+        <button type="button" class="btn btn-sm" data-m="center" title="Pad the line with spaces so it sits in the middle">Center line</button>
+        <select class="input input-sm" data-m="template" aria-label="Templates"><option value="">Templates...</option>${MOTD_TEMPLATES.filter((t) => hex || !t.hex)
+          .map((t) => `<option value="${t.id}">${esc(t.name)}</option>`)
+          .join('')}</select>
+      </div>
+      <div class="row motd-row hidden" data-m="grad">
+        <span class="faint small">From</span><input type="color" data-m="g1" value="#ff5f6d" aria-label="First color"><span class="faint small">via</span><input type="color" data-m="g2" value="#ffc371" aria-label="Second color"><span class="faint small">to</span><input type="color" data-m="g3" value="#c99bff" aria-label="Third color">
+        <label class="check"><input type="checkbox" data-m="g3on"> <span>3 colors</span></label>
+        <label class="check"><input type="checkbox" data-m="gbold" checked> <span>Bold</span></label>
+        <button type="button" class="btn btn-sm btn-accent" data-m="grad-apply">Apply</button>
+        <span class="hint">Select text in a line first, or the whole line gets the gradient.</span>
+      </div>
+    </div>
+    <div class="motd-lines">
+      ${[0, 1]
+        .map(
+          (i) => `<div class="motd-line"><span class="lbl">Line ${i + 1}</span><input class="input mono" data-line="${i}" value="${esc(lines[i])}" spellcheck="false" autocomplete="off" maxlength="900" aria-label="Line ${i + 1}"><span class="motd-meter" data-meter="${i}"></span></div>`,
+        )
+        .join('')}
+    </div>
+    <p class="hint">Type codes yourself if you like: <span class="mono">&amp;0</span>-<span class="mono">&amp;9</span> and <span class="mono">&amp;a</span>-<span class="mono">&amp;f</span> colors, <span class="mono">&amp;l</span> bold, <span class="mono">&amp;o</span> italic, <span class="mono">&amp;n</span> underline, <span class="mono">&amp;m</span> strikethrough, <span class="mono">&amp;k</span> obfuscated, <span class="mono">&amp;r</span> reset${
+      hex ? ', <span class="mono">&amp;#rrggbb</span> any color' : ''
+    }. A color code also ends bold and the other styles, like in Minecraft.</p>
+    ${hex ? '' : notice('This server type can only show the 16 standard colors, so hex colors and gradients are saved as the nearest one. Paper, Purpur and Spigot (1.16+), Velocity and BungeeCord show any color.')}`;
+  const q = (k) => $(`[data-m="${k}"]`, box);
+  const inputs = () => $$('[data-line]', box);
+  function sync() {
+    for (const [i, line] of lines.entries()) {
+      const meter = $(`[data-meter="${i}"]`, box);
+      const w = motdPixels(line);
+      meter.textContent = `${w} / ${MOTD_WIDTH} px`;
+      meter.classList.toggle('over', w > MOTD_WIDTH);
+      meter.title = w > MOTD_WIDTH ? 'Longer than the server list shows: the end is cut off in game' : 'Width in the server list (approximate)';
+    }
+    onInput([...lines]);
+  }
+  const setLine = (i, value, caret) => {
+    lines[i] = value;
+    const input = inputs()[i];
+    input.value = value;
+    input.focus();
+    if (caret != null) input.setSelectionRange(caret, caret);
+    sync();
+  };
+  /** Put `code` before the selection (or at the cursor) and restore the earlier style after the selection. */
+  function applyCode(code) {
+    const input = inputs()[focused];
+    const v = input.value;
+    const [a, b] = [input.selectionStart ?? v.length, input.selectionEnd ?? v.length];
+    if (a === b) return setLine(focused, v.slice(0, a) + code + v.slice(a), a + code.length);
+    const after = styleAt(v.slice(0, b));
+    setLine(focused, v.slice(0, a) + code + v.slice(a, b) + after + v.slice(b), a + code.length + (b - a) + after.length);
+  }
+  box.addEventListener('mousedown', (e) => {
+    // Keep the cursor and selection in the line while clicking toolbar buttons.
+    if (e.target.closest('.swatch, .fmt button, [data-m="center"], [data-m="grad-apply"]')) e.preventDefault();
+  });
+  box.addEventListener('focusin', (e) => {
+    if (e.target.matches('[data-line]')) focused = Number(e.target.dataset.line);
+  });
+  box.addEventListener('input', (e) => {
+    if (!e.target.matches('[data-line]')) return;
+    lines[Number(e.target.dataset.line)] = e.target.value.replace(/\n/g, '');
+    sync();
+  });
+  box.addEventListener('click', (e) => {
+    const code = e.target.closest('[data-code]');
+    if (code) return applyCode(`&${code.dataset.code}`);
+    if (e.target.closest('[data-m="center"]')) return setLine(focused, centerLine(lines[focused]));
+    if (e.target.closest('[data-m="grad-toggle"]')) return q('grad').classList.toggle('hidden');
+    if (e.target.closest('[data-m="grad-apply"]')) {
+      const input = inputs()[focused];
+      const v = input.value;
+      let [a, b] = [input.selectionStart ?? 0, input.selectionEnd ?? 0];
+      if (a === b) [a, b] = [0, v.length];
+      const stops = [q('g1').value, q('g2').value, ...(q('g3on').checked ? [q('g3').value] : [])].map((c) => c.slice(1));
+      const g = gradientText(v.slice(a, b), stops, q('gbold').checked);
+      const after = b < v.length ? styleAt(v.slice(0, b)) : '';
+      setLine(focused, v.slice(0, a) + g + after + v.slice(b));
+    }
+  });
+  box.addEventListener('change', (e) => {
+    if (e.target === q('hex')) applyCode(`&${e.target.value.toLowerCase()}`); // the picker gives #rrggbb
+    if (e.target === q('template') && e.target.value) {
+      const t = MOTD_TEMPLATES.find((x) => x.id === e.target.value);
+      lines = t.make(name.slice(0, 40));
+      inputs().forEach((inp, i) => (inp.value = lines[i]));
+      e.target.value = '';
+      sync();
+    }
+  });
+  sync();
+  return {
+    set(next) {
+      lines = [...next, ''].slice(0, 2);
+      inputs().forEach((inp, i) => (inp.value = lines[i]));
+      sync();
+    },
+  };
+}
+
 function PropertiesTab(el, ctx) {
   const s = ctx.srv;
   el.innerHTML = `
@@ -3402,7 +3528,7 @@ function PropertiesTab(el, ctx) {
 
   // ---------------------------------------------------------------- MOTD editor
   let saved = '';
-  let focused = 0; // the line the toolbar acts on
+  let editor = null;
   const kindLabel = { vanilla: 'Vanilla / Fabric', spigot: 'Paper / Spigot', velocity: 'Velocity', bungeecord: 'BungeeCord' };
 
   function renderMotd() {
@@ -3410,60 +3536,21 @@ function PropertiesTab(el, ctx) {
     $('#m-where', el).innerHTML = `${esc(kindLabel[m.kind] || m.kind)} · saved in <span class="mono">${esc(m.file)}</span> as ${esc(m.format)}`;
     $('#motd-ed', el).innerHTML = `
       <h3>MOTD</h3>
-      <div class="motd-tools">
-        <div class="swatches" role="group" aria-label="Colors">${Object.entries(MC_HEX)
-          .map(([c, h]) => `<button type="button" class="swatch" data-code="${c}" style="background:${h}" title="${MC_COLOR_NAMES[c]} (&amp;${c})" aria-label="${MC_COLOR_NAMES[c]}"></button>`)
-          .join('')}</div>
-        <div class="row motd-row">
-          <div class="seg fmt" role="group" aria-label="Formatting">
-            <button type="button" data-code="l" title="Bold (&amp;l)"><b>B</b></button>
-            <button type="button" data-code="o" title="Italic (&amp;o)"><i>I</i></button>
-            <button type="button" data-code="n" title="Underline (&amp;n)"><u>U</u></button>
-            <button type="button" data-code="m" title="Strikethrough (&amp;m)"><s>S</s></button>
-            <button type="button" data-code="k" title="Obfuscated, flickering text (&amp;k)">?!</button>
-            <button type="button" data-code="r" title="Reset to plain gray (&amp;r)">Reset</button>
-          </div>
-          <label class="hexpick ${m.hex ? '' : 'off'}" title="${m.hex ? 'Any color (&amp;#rrggbb)' : 'This server type shows only the 16 colors above'}"><input type="color" id="m-hex" value="#ff8800" ${m.hex ? '' : 'disabled'}><span>Hex</span></label>
-          <button type="button" class="btn btn-sm" id="m-grad-toggle" ${m.hex ? '' : 'disabled title="This server type shows only the 16 standard colors"'}>Gradient</button>
-          <button type="button" class="btn btn-sm" id="m-center" title="Pad the line with spaces so it sits in the middle">Center line</button>
-          <select class="input input-sm" id="m-template" aria-label="Templates"><option value="">Templates...</option>${MOTD_TEMPLATES.filter((t) => m.hex || !t.hex)
-            .map((t) => `<option value="${t.id}">${esc(t.name)}</option>`)
-            .join('')}</select>
-        </div>
-        <div class="row motd-row hidden" id="m-grad">
-          <span class="faint small">From</span><input type="color" id="m-g1" value="#ff5f6d"><span class="faint small">via</span><input type="color" id="m-g2" value="#ffc371"><span class="faint small">to</span><input type="color" id="m-g3" value="#c99bff">
-          <label class="check"><input type="checkbox" id="m-g3on"> <span>3 colors</span></label>
-          <label class="check"><input type="checkbox" id="m-gbold" checked> <span>Bold</span></label>
-          <button type="button" class="btn btn-sm btn-accent" id="m-grad-apply">Apply</button>
-          <span class="hint">Select text in a line first, or the whole line gets the gradient.</span>
-        </div>
-      </div>
-      <div class="motd-lines">
-        ${[0, 1]
-          .map(
-            (i) => `<div class="motd-line"><span class="lbl">Line ${i + 1}</span><input class="input mono" data-line="${i}" value="${esc(lines[i])}" spellcheck="false" autocomplete="off" maxlength="900"><span class="motd-meter" data-meter="${i}"></span></div>`,
-          )
-          .join('')}
-      </div>
-      <p class="hint">Type codes yourself if you like: <span class="mono">&amp;0</span>-<span class="mono">&amp;9</span> and <span class="mono">&amp;a</span>-<span class="mono">&amp;f</span> colors, <span class="mono">&amp;l</span> bold, <span class="mono">&amp;o</span> italic, <span class="mono">&amp;n</span> underline, <span class="mono">&amp;m</span> strikethrough, <span class="mono">&amp;k</span> obfuscated, <span class="mono">&amp;r</span> reset${
-        m.hex ? ', <span class="mono">&amp;#rrggbb</span> any color' : ''
-      }. A color code also ends bold and the other styles, like in Minecraft.</p>
-      ${m.hex ? '' : notice('This server type can only show the 16 standard colors, so hex colors and gradients are saved as the nearest one. Paper, Purpur and Spigot (1.16+), Velocity and BungeeCord show any color.')}
+      <div class="motd-box"></div>
       <details class="raw"><summary class="faint small">Stored value</summary><pre class="mono small" id="m-raw">${esc(m.raw)}</pre></details>
       <div class="form-actions"><button type="button" class="btn btn-ghost btn-sm" id="m-revert" disabled>Undo changes</button><button type="button" class="btn btn-accent btn-sm" id="m-save" disabled>${icon('save')}Save MOTD</button></div>`;
-    syncMotd();
+    editor = motdEditor($('.motd-box', el), {
+      lines,
+      hex: m.hex,
+      name: ctx.srv.name,
+      onInput: (next) => {
+        lines = next;
+        syncMotd();
+      },
+    });
   }
 
-  const inputs = () => $$('[data-line]', el);
   function syncMotd() {
-    for (const [i, line] of lines.entries()) {
-      const meter = $(`[data-meter="${i}"]`, el);
-      if (!meter) continue;
-      const w = motdPixels(line);
-      meter.textContent = `${w} / ${MOTD_WIDTH} px`;
-      meter.classList.toggle('over', w > MOTD_WIDTH);
-      meter.title = w > MOTD_WIDTH ? 'Longer than the server list shows: the end is cut off in game' : 'Width in the server list (approximate)';
-    }
     const dirty = lines.join('\n').replace(/\n$/, '') !== saved;
     if ($('#m-save', el)) {
       $('#m-save', el).disabled = !dirty;
@@ -3471,60 +3558,10 @@ function PropertiesTab(el, ctx) {
     }
     renderPreview();
   }
-  const setLine = (i, value, caret) => {
-    lines[i] = value;
-    const input = inputs()[i];
-    input.value = value;
-    input.focus();
-    if (caret != null) input.setSelectionRange(caret, caret);
-    syncMotd();
-  };
-
-  /** Put `code` before the selection (or at the cursor) and restore the earlier style after the selection. */
-  function applyCode(code) {
-    const input = inputs()[focused];
-    const v = input.value;
-    const [a, b] = [input.selectionStart ?? v.length, input.selectionEnd ?? v.length];
-    if (a === b) return setLine(focused, v.slice(0, a) + code + v.slice(a), a + code.length);
-    const after = styleAt(v.slice(0, b));
-    const next = v.slice(0, a) + code + v.slice(a, b) + after + v.slice(b);
-    setLine(focused, next, a + code.length + (b - a) + after.length);
-  }
 
   function wireMotd() {
-    const ed = $('#motd-ed', el);
-    ed.addEventListener('mousedown', (e) => {
-      // Keep the cursor and selection in the line while clicking toolbar buttons.
-      if (e.target.closest('.swatch, .fmt button, #m-center, #m-grad-apply')) e.preventDefault();
-    });
-    ed.addEventListener('focusin', (e) => {
-      if (e.target.matches('[data-line]')) focused = Number(e.target.dataset.line);
-    });
-    ed.addEventListener('input', (e) => {
-      if (!e.target.matches('[data-line]')) return;
-      lines[Number(e.target.dataset.line)] = e.target.value.replace(/\n/g, '');
-      syncMotd();
-    });
-    ed.addEventListener('click', async (e) => {
-      const code = e.target.closest('[data-code]');
-      if (code) return applyCode(`&${code.dataset.code}`);
-      if (e.target.closest('#m-center')) return setLine(focused, centerLine(lines[focused]));
-      if (e.target.closest('#m-grad-toggle')) return $('#m-grad', el).classList.toggle('hidden');
-      if (e.target.closest('#m-grad-apply')) {
-        const input = inputs()[focused];
-        const v = input.value;
-        let [a, b] = [input.selectionStart ?? 0, input.selectionEnd ?? 0];
-        if (a === b) [a, b] = [0, v.length];
-        const stops = [$('#m-g1', el).value, $('#m-g2', el).value, ...($('#m-g3on', el).checked ? [$('#m-g3', el).value] : [])].map((c) => c.slice(1));
-        const g = gradientText(v.slice(a, b), stops, $('#m-gbold', el).checked);
-        const after = b < v.length ? styleAt(v.slice(0, b)) : '';
-        return setLine(focused, v.slice(0, a) + g + after + v.slice(b));
-      }
-      if (e.target.closest('#m-revert')) {
-        lines = [...saved.split('\n'), ''].slice(0, 2);
-        inputs().forEach((inp, i) => (inp.value = lines[i]));
-        return syncMotd();
-      }
+    $('#motd-ed', el).addEventListener('click', async (e) => {
+      if (e.target.closest('#m-revert')) return editor.set(saved.split('\n'));
       if (e.target.closest('#m-save')) {
         const btn = e.target.closest('#m-save');
         btn.disabled = true;
@@ -3537,16 +3574,6 @@ function PropertiesTab(el, ctx) {
         } catch (err) {
           toast(err.message, 'bad');
         }
-        syncMotd();
-      }
-    });
-    ed.addEventListener('change', (e) => {
-      if (e.target.id === 'm-hex') applyCode(`&${e.target.value.toLowerCase()}`); // the picker gives #rrggbb
-      if (e.target.id === 'm-template' && e.target.value) {
-        const t = MOTD_TEMPLATES.find((x) => x.id === e.target.value);
-        lines = t.make(ctx.srv.name.slice(0, 40));
-        inputs().forEach((inp, i) => (inp.value = lines[i]));
-        e.target.value = '';
         syncMotd();
       }
     });
@@ -4085,6 +4112,9 @@ function ServerSettingsTab(el, ctx) {
           ${ramField('maxRam', 'Maximum RAM', s.maxRam)}
           ${ramField('minRam', 'Starting RAM', s.minRam)}
           <div class="field"><label>Stop timeout (seconds)</label><input class="input" type="number" name="stopTimeout" min="10" value="${s.stopTimeout}"><span class="hint">Kill the process if it has not stopped by then.</span></div>
+          <div class="field"><label for="ss-port">Port</label><input class="input mono" id="ss-port" type="number" name="port" min="1" max="65535" value="${s.port}"><span class="hint">The port players connect to, saved in <span class="mono">${esc(
+            s.configFile,
+          )}</span>. Checked against every other port on this panel. Restart to use it.</span></div>
           <div class="field"><label>Address for players</label><input class="input mono" name="publicAddress" value="${esc(s.customAddress || '')}" placeholder="${esc(
             s.publicAddress || `Automatic (${location.hostname}:${s.port})`,
           )}"><span class="hint">Shown on the dashboard. Use it for a domain. Railway TCP proxy and playit.gg tunnel addresses are filled in automatically when this is empty.</span></div>
@@ -4101,14 +4131,19 @@ function ServerSettingsTab(el, ctx) {
       </form>
 
       <form class="card panel-card form" id="ss-soft">
-        <div><h2>Software</h2><p class="sub" style="margin:4px 0 0">Currently <strong>${esc(softwareLabel(s))}</strong>. Download a different version or software; this replaces server.jar. Make a backup first, since worlds cannot be downgraded.</p></div>
-        <div class="form-grid">
-          <div class="field"><label>Software</label><select class="input" name="type">${DOWNLOADABLE.map(
-            (t) => `<option value="${t}" ${t === s.type ? 'selected' : ''}>${TYPE_LABEL[t]}</option>`,
-          ).join('')}</select></div>
-          <div class="field"><label>Version</label><select class="input" name="version"></select></div>
-        </div>
-        <div class="form-actions"><button class="btn btn-magenta" type="submit" id="ss-install">${icon('download')}Download and install</button></div>
+        <div><h2>Software</h2><p class="sub" style="margin:4px 0 0">The server jar: what is installed, and whether a newer build is out. Updating replaces server.jar; worlds, plugins and configs stay.</p></div>
+        <div class="soft-status" id="ss-status"><p class="muted row"><span class="spin"></span>Checking for updates...</p></div>
+        <details class="soft-other">
+          <summary>Install another version or software</summary>
+          <p class="hint" style="margin:8px 0 12px">This replaces server.jar. Make a backup first: worlds cannot be moved back to an older Minecraft version.</p>
+          <div class="form-grid">
+            <div class="field"><label>Software</label><select class="input" name="type">${DOWNLOADABLE.map(
+              (t) => `<option value="${t}" ${t === s.type ? 'selected' : ''}>${TYPE_LABEL[t]}</option>`,
+            ).join('')}</select></div>
+            <div class="field"><label>Version</label><select class="input" name="version"></select></div>
+          </div>
+          <div class="form-actions"><button class="btn btn-magenta" type="submit" id="ss-install">${icon('download')}Download and install</button></div>
+        </details>
       </form>
 
       ${
@@ -4175,9 +4210,22 @@ function ServerSettingsTab(el, ctx) {
   form.elements.javaPath.onchange = () => checkJava().catch(() => {});
   $('#ss-aikar', el).onclick = () => (form.elements.jvmArgs.value = AIKAR_FLAGS);
 
+  let savedPort = s.port;
   form.onsubmit = async (e) => {
     e.preventDefault();
     const f = form.elements;
+    // The port first: it is checked against every other port, and nothing else is saved if it is taken.
+    const port = Number(f.port.value);
+    let moved = false;
+    if (port !== savedPort) {
+      try {
+        moved = (await api('PUT', `/api/servers/${ctx.id}/port`, { port })).changed;
+        savedPort = port;
+      } catch (err) {
+        f.port.focus();
+        return toast(err.message, 'bad');
+      }
+    }
     try {
       await api('PATCH', `/api/servers/${ctx.id}`, {
         name: f.name.value,
@@ -4194,7 +4242,7 @@ function ServerSettingsTab(el, ctx) {
         eula: f.eula.checked,
         ...(f.owner ? { owner: f.owner.value.trim() } : {}),
       });
-      toast('Settings saved', 'ok');
+      toast(moved ? `Settings saved. The server now uses port ${port}${s.pid ? ': restart it to use the new port' : ''}.` : 'Settings saved', 'ok');
       poll();
     } catch (err) {
       toast(err.message, 'bad');
@@ -4208,13 +4256,8 @@ function ServerSettingsTab(el, ctx) {
     });
   soft.elements.type.onchange = loadVersions;
   loadVersions();
-  soft.onsubmit = async (e) => {
-    e.preventDefault();
-    const type = soft.elements.type.value;
-    const version = versionSel.value;
-    if (!version) return;
-    const ok = await confirmBox(`Install ${TYPE_LABEL[type]} ${version}?`, 'server.jar will be replaced. Your worlds, plugins and configs stay in place.', { confirmText: 'Install' });
-    if (!ok) return;
+  async function install(type, version, title, message) {
+    if (!(await confirmBox(title, message, { confirmText: 'Install' }))) return;
     try {
       await api('POST', `/api/servers/${ctx.id}/install`, { type, version });
       toast('Installing. Watch progress in the console.', 'ok');
@@ -4222,7 +4265,53 @@ function ServerSettingsTab(el, ctx) {
     } catch (err) {
       toast(err.message, 'bad');
     }
+  }
+  soft.onsubmit = (e) => {
+    e.preventDefault();
+    const type = soft.elements.type.value;
+    const version = versionSel.value;
+    if (version) install(type, version, `Install ${TYPE_LABEL[type]} ${version}?`, 'server.jar will be replaced. Your worlds, plugins and configs stay in place.');
   };
+
+  // What is installed against the newest build of the same version, and any newer Minecraft version.
+  const softName = `${TYPE_LABEL[s.type] || s.type}${s.version && s.version !== 'latest' ? ` ${s.version}` : ''}`;
+  const buildOf = (b) => (b?.build != null ? `build ${b.build}` : '');
+  const dateOf = (b) => (b?.time ? `<span class="faint small">${new Date(b.time).toLocaleDateString(undefined, { dateStyle: 'medium' })}</span>` : '');
+  function renderSoft(st) {
+    const rows = [];
+    rows.push(`<div class="soft-row"><span class="lbl">Installed</span><div><strong>${esc(softName)}</strong> <span class="mono">${esc(buildOf(st.current) || (st.latest ? 'build not recognised' : ''))}</span> ${dateOf(st.current)}</div></div>`);
+    if (st.latest) {
+      const action =
+        st.upToDate === true
+          ? '<span class="pill ok"><span class="dot ok"></span>Up to date</span>'
+          : `<button type="button" class="btn btn-accent btn-sm" data-soft-update>${icon('download')}${buildOf(st.latest) ? `Update to ${esc(buildOf(st.latest))}` : 'Download the newest jar'}</button>`;
+      rows.push(`<div class="soft-row"><span class="lbl">Newest</span><div><strong>${esc(softName)}</strong> <span class="mono">${esc(buildOf(st.latest))}</span> ${dateOf(st.latest)}</div><span class="spacer"></span>${action}</div>`);
+    } else if (st.known && s.type === 'fabric') {
+      rows.push(`<div class="soft-row"><span class="lbl">Newest</span><div class="faint small">Fabric does not number its server jars. Installing the same version again gets the newest Fabric loader.</div><span class="spacer"></span><button type="button" class="btn btn-sm" data-soft-update>${icon('restart')}Reinstall ${esc(softName)}</button></div>`);
+    } else if (!st.known) {
+      rows.push(`<p class="faint small" style="margin:0">This server runs a jar WebbMC did not download (a custom or imported one), so it cannot check it for updates. Pick a software below to switch to one WebbMC can keep up to date.</p>`);
+    } else rows.push(`<p class="faint small" style="margin:0">Could not check for a newer build right now. Try again later.</p>`);
+    if (st.newerVersion)
+      rows.push(`<div class="soft-row newer"><span class="lbl">Newer Minecraft</span><div><strong>${esc(TYPE_LABEL[s.type] || s.type)} ${esc(st.newerVersion)}</strong> <span class="faint small">is out. Back up first and check your plugins support it.</span></div><span class="spacer"></span><button type="button" class="btn btn-sm" data-soft-version="${esc(
+        st.newerVersion,
+      )}">${icon('arrow')}Move to ${esc(st.newerVersion)}</button></div>`);
+    $('#ss-status', el).innerHTML = rows.join('');
+  }
+  api('GET', `/api/servers/${ctx.id}/software`)
+    .then(renderSoft)
+    .catch((err) => ($('#ss-status', el).innerHTML = `<p class="faint small" style="margin:0">Could not check for updates: ${esc(err.message)}</p>`));
+  $('#ss-status', el).addEventListener('click', (e) => {
+    if (e.target.closest('[data-soft-update]'))
+      return install(s.type, s.version, `Update ${softName}?`, 'server.jar is replaced with the newest build of the same version. Your worlds, plugins and configs stay in place.');
+    const v = e.target.closest('[data-soft-version]')?.dataset.softVersion;
+    if (v)
+      install(
+        s.type,
+        v,
+        `Move to ${TYPE_LABEL[s.type] || s.type} ${v}?`,
+        `server.jar is replaced with ${v}. Make a backup first: once the world has been opened in ${v} it cannot go back to ${s.version}. Check that your plugins support ${v}.`,
+      );
+  });
 
   const share = $('#ss-share', el);
   if (share) {
@@ -4307,11 +4396,386 @@ function ServerSettingsTab(el, ctx) {
   return { update: sync };
 }
 
+// ================================================================ plugin config tab
+// The settings of a few popular plugins (Geyser, MCXboxBroadcast, DiscordSRV, MiniMOTD, TAB, BlueMap), read from their
+// own config files. Each plugin folds; inside, its main settings first, then every setting by file and section, with
+// the file's own comments as help. One Save per plugin writes only the settings that changed.
+
+const SECRET_KEY = /token|secret|password|private-key|webhook/i;
+/** "clone-remote-port" and "BotToken" as "Clone remote port" and "Bot token". */
+const humanKey = (k) => {
+  const s = String(k).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_.]+/g, ' ').trim().toLowerCase();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
+
+function PluginConfigTab(el, ctx) {
+  const sid = ctx.id;
+  let data = null;
+  const files = new Map(); // path -> { file, byLine }
+  const motds = new Map(); // MiniMOTD main.conf path -> { list (being edited), saved (JSON) }
+  const foldKey = `plugcfg:${sid}`;
+  const opened = new Set(pref.get(foldKey, []));
+  let uid = 0;
+  el.innerHTML = '<div class="card panel-card"><p class="muted">Loading...</p></div>';
+
+  const isOpen = (k) => (opened.has(k) ? 'open' : '');
+  const noteHtml = (note) => {
+    if (!note) return '';
+    const [first, ...rest] = note.split('\n');
+    const more = rest.join('\n').trim();
+    return more ? `<details class="cfg-note"><summary>${esc(first)}</summary>${esc(more)}</details>` : `<div class="cfg-note">${esc(first)}</div>`;
+  };
+
+  function control(file, it, options, id) {
+    const a = `id="${id}" data-file="${esc(file.path)}" data-cfg-line="${it.line}"`;
+    const key = it.path[it.path.length - 1];
+    if (it.type === 'bool') return `<label class="switch"><input type="checkbox" ${a} ${it.value ? 'checked' : ''}><span class="track"></span></label>`;
+    if (it.type === 'number') return `<input class="input input-sm mono" ${a} value="${esc(it.value)}" inputmode="decimal" autocomplete="off">`;
+    if (it.type === 'list')
+      return `<textarea class="input mono cfg-list" ${a} rows="${Math.min(8, Math.max(2, it.value.length + 1))}" spellcheck="false" aria-describedby="${id}-h">${esc(it.value.join('\n'))}</textarea><span class="hint" id="${id}-h">One per line</span>`;
+    if (it.type === 'raw') return `<input class="input input-sm mono" ${a} value="${esc(it.value)}" spellcheck="false" autocomplete="off">`;
+    if (it.type === 'complex') return `<span class="faint small">Change this one in the Files tab</span>`;
+    const opts = options[it.path.join('.')];
+    if (opts) return `<select class="input input-sm" ${a}>${[...new Set([...opts, it.value])].map((o) => `<option ${o === it.value ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    if (SECRET_KEY.test(key))
+      return `<span class="cfg-secret"><input type="password" class="input input-sm mono" ${a} value="${esc(it.value)}" autocomplete="off" spellcheck="false"><button type="button" class="icon-btn" data-reveal title="Show or hide" aria-label="Show or hide ${esc(humanKey(key))}">${icon('key')}</button></span>`;
+    return `<input class="input input-sm" ${a} value="${esc(it.value)}" spellcheck="false" autocomplete="off">`;
+  }
+
+  function row(file, it, options) {
+    const id = `cfg${++uid}`;
+    return `<div class="cfg-row">
+        <div class="cfg-label"><label for="${id}">${esc(humanKey(it.path[it.path.length - 1]))}</label><span class="mono faint small">${esc(it.path.join('.'))}</span>${noteHtml(it.note)}</div>
+        <div class="cfg-ctl">${control(file, it, options, id)}</div>
+      </div>`;
+  }
+
+  /** A file's settings as nested foldable sections, leaving out the ones already shown as main settings. */
+  function fileTree(p, file, skip) {
+    const rootNode = { children: [] };
+    const nodes = new Map([['', rootNode]]);
+    for (const it of file.items) {
+      if (skip.has(it.line)) continue;
+      const parent = nodes.get(it.path.slice(0, -1).join('\u0000')) || rootNode;
+      if (it.kind === 'section') {
+        const node = { it, children: [] };
+        nodes.set(it.path.join('\u0000'), node);
+        parent.children.push(node);
+      } else parent.children.push({ it });
+    }
+    const count = (n) => n.children.reduce((sum, c) => sum + (c.children ? count(c) : 1), 0);
+    const draw = (n) =>
+      n.children
+        .map((c) => {
+          if (!c.children) return row(file, c.it, p.options);
+          const total = count(c);
+          if (!total) return '';
+          const k = `s:${file.path}:${c.it.path.join('.')}`;
+          return `<details class="cfg-sec" data-fold="${esc(k)}" ${isOpen(k)}><summary>${esc(humanKey(c.it.path[c.it.path.length - 1]))} <span class="faint small">${total} setting${
+            total === 1 ? '' : 's'
+          }</span></summary>${noteHtml(c.it.note)}${draw(c)}</details>`;
+        })
+        .join('');
+    return draw(rootNode);
+  }
+
+  const filesLink = (path) =>
+    `<a class="btn btn-sm btn-ghost" href="#/server/${sid}/files" data-open-dir="${esc(path.split('/').slice(0, -1).join('/'))}">${icon('folder')}Open in Files</a>`;
+
+  function motdsHtml(file) {
+    if (file.motds === undefined) return '';
+    if (!file.motds) return notice(`The MOTD list in <span class="mono">${esc(file.path)}</span> is laid out in a way WebbMC cannot edit. Change it in the Files tab.`, 'warn');
+    return `<div class="cfg-group"><h4>MOTDs</h4><p class="hint" style="margin:0 0 8px">MiniMOTD shows one of these at random. Placeholders such as <span class="mono">&lt;online_players&gt;</span> work as typed.</p>
+      <div class="motd-list" data-motds="${esc(file.path)}"></div>
+      <button type="button" class="btn btn-sm" data-motd-add="${esc(file.path)}">${icon('plus')}Add a MOTD</button></div>`;
+  }
+
+  const iconUrl = () => (ctx.srv.icon ? `/api/servers/${sid}/icon?v=${ctx.srv.icon}` : null);
+  const motdPreview = (m) =>
+    mcEntry({ icon: iconUrl(), name: ctx.srv.name, motdHtml: mcHtml(ampToSection([m.line1, m.line2].filter((l, i) => i === 0 || l).join('\n'), true)), online: true, players: 0, max: ctx.srv.maxPlayers || 20, latency: 30 });
+
+  /** Draw a MiniMOTD file's MOTDs, each with its own editor. */
+  function drawMotds(path, card) {
+    const box = $(`[data-motds="${CSS.escape(path)}"]`, card);
+    if (!box) return;
+    const st = motds.get(path);
+    box.innerHTML = st.list
+      .map(
+        (m, i) => `<details class="cfg-sec motd-item" open><summary>MOTD ${i + 1}</summary>
+          <div class="motd-prev" data-prev="${i}">${motdPreview(m)}</div>
+          <div class="row" style="gap:8px;margin:8px 0"><label class="faint small" for="mi-${uid}-${i}">Icon</label><input class="input input-sm mono" id="mi-${uid}-${i}" data-motd-icon="${i}" value="${esc(m.icon)}" placeholder="random" style="max-width:220px">
+            <span class="hint">"random", or the name of a picture in MiniMOTD's icons folder</span><span class="spacer"></span>${
+              st.list.length > 1 ? `<button type="button" class="btn btn-sm btn-ghost" data-motd-del="${i}">${icon('trash')}Remove</button>` : ''
+            }</div>
+          <div data-motd-ed="${i}"></div></details>`,
+      )
+      .join('');
+    st.list.forEach((m, i) => {
+      motdEditor($(`[data-motd-ed="${i}"]`, box), {
+        lines: [m.line1, m.line2],
+        hex: true,
+        name: ctx.srv.name,
+        onInput: ([a, b]) => {
+          m.line1 = a;
+          m.line2 = b;
+          $(`[data-prev="${i}"]`, box).innerHTML = motdPreview(m);
+          markDirty(card);
+        },
+      });
+    });
+  }
+
+  /** Rows for the main settings ("file label:path" or "path", whichever this plugin version has) found in `list`. */
+  function mainRows(p, list, keys, skip) {
+    const rows = [];
+    for (const m of keys) {
+      const [label, key] = m.includes(':') ? m.split(/:(.*)/) : [null, m];
+      for (const f of list) {
+        if (label && f.label !== label) continue;
+        const it = (f.items || []).find((x) => x.kind === 'value' && x.path.join('.') === key);
+        if (it && !skip.get(f.path).has(it.line)) {
+          skip.get(f.path).add(it.line);
+          rows.push(row(f, it, p.options));
+          break;
+        }
+      }
+    }
+    return rows.length ? `<div class="cfg-group"><h4>Main settings</h4>${rows.join('')}</div>` : '';
+  }
+
+  /** "All settings" of some files: right there for one file, a foldable block per file for several. */
+  function allSettings(p, list, skip) {
+    if (list.length === 1 && !list[0].error) {
+      const f = list[0];
+      const body = `${motdsHtml(f)}${fileTree(p, f, skip.get(f.path))}`;
+      return body ? `<div class="cfg-group"><h4>All settings <span class="mono faint small">${esc(f.path)}</span></h4>${body}</div>` : '';
+    }
+    const blocks = list
+      .map((f) => {
+        if (f.error) return notice(`${esc(f.label)}: ${esc(f.error)}`, 'warn');
+        const body = `${motdsHtml(f)}${fileTree(p, f, skip.get(f.path))}`;
+        const k = `f:${f.path}`;
+        return `<details class="cfg-file" data-fold="${esc(k)}" ${isOpen(k)}><summary>${esc(f.label)} <span class="mono faint small">${esc(f.path)}</span></summary>${body || '<p class="faint small">Nothing else here.</p>'}</details>`;
+      })
+      .join('');
+    return blocks ? `<div class="cfg-group"><h4>All settings</h4><div class="stack-sm">${blocks}</div></div>` : '';
+  }
+
+  /** A part of a plugin with its own files, such as a Geyser extension: one foldable block in the plugin's card. */
+  function sectionHtml(p, sec, skip) {
+    const head = `${icon('puzzle')}<strong>${esc(sec.name)}</strong><span class="faint small">${esc(sec.about)}</span>`;
+    if (!sec.installed)
+      return `<div class="cfg-ext missing">${head}<span class="spacer"></span><span class="faint small">Not installed. <a href="#/server/${sid}/addons">Get it from GeyserMC</a> in the Plugins tab.</span></div>`;
+    const list = p.files.filter((f) => f.section === sec.id);
+    const k = `x:${p.id}:${sec.id}`;
+    const body = list.length
+      ? `${mainRows(p, list, sec.main, skip)}${allSettings(p, list, skip)}`
+      : notice(`${esc(sec.name)} is installed but has not written its config yet. Start the server once, then come back.`);
+    return `<details class="cfg-file cfg-ext" data-fold="${esc(k)}" ${isOpen(k)}><summary>${head}</summary><div class="cfg-ext-body">${body}</div></details>`;
+  }
+
+  function pluginHtml(p) {
+    const own = p.files.filter((f) => !f.section);
+    if (!own.length)
+      return `<details class="card plug-card" data-plugin="${p.id}" data-fold="p:${p.id}" ${isOpen(`p:${p.id}`)}><summary><strong>${esc(p.name)}</strong><span class="faint small">${esc(p.about)}</span></summary>
+        <div class="plug-body">${notice(`${esc(p.name)} is installed but has not written its config yet. Start the server once, then come back.`)}</div></details>`;
+    const skip = new Map(p.files.map((f) => [f.path, new Set()]));
+    const sections = (p.sections || []).map((sec) => sectionHtml(p, sec, skip)).join('');
+    return `<details class="card plug-card" data-plugin="${p.id}" data-fold="p:${p.id}" ${isOpen(`p:${p.id}`)}>
+        <summary><strong>${esc(p.name)}</strong><span class="faint small">${esc(p.about)}</span><span class="spacer"></span><span class="tag hidden" data-dirty></span></summary>
+        <div class="plug-body">
+          ${mainRows(p, own, p.main, skip)}
+          ${allSettings(p, own, skip)}
+          ${sections ? `<div class="cfg-group"><h4>Extensions</h4><div class="stack-sm">${sections}</div></div>` : ''}
+          <div class="form-actions plug-actions">${filesLink(own[0].path)}<span class="spacer"></span>
+            <button type="button" class="btn btn-ghost btn-sm" data-undo disabled>Undo changes</button>
+            <button type="button" class="btn btn-accent btn-sm" data-save disabled>${icon('save')}Save</button></div>
+        </div>
+      </details>`;
+  }
+
+  // ---------------------------------------------------------------- what changed
+  const itemOf = (input) => files.get(input.dataset.file)?.byLine.get(Number(input.dataset.cfgLine));
+  const valueOf = (input, it) => (it.type === 'bool' ? input.checked : it.type === 'list' ? input.value.split('\n').map((x) => x.trim()).filter(Boolean) : input.value);
+  const changed = (input, it) => {
+    const v = valueOf(input, it);
+    return it.type === 'list' ? JSON.stringify(v) !== JSON.stringify(it.value) : it.type === 'bool' ? v !== it.value : v !== String(it.value);
+  };
+  const motdsChanged = (path) => {
+    const st = motds.get(path);
+    return Boolean(st) && JSON.stringify(st.list.map(({ icon: i, line1, line2 }) => [i, line1, line2])) !== st.saved;
+  };
+  const cardFiles = (card) => data.find((p) => p.id === card.dataset.plugin).files.filter((f) => !f.error);
+  function markDirty(card) {
+    let n = 0;
+    for (const input of $$('[data-cfg-line]', card)) {
+      const it = itemOf(input);
+      if (!it) continue;
+      const c = changed(input, it);
+      input.closest('.cfg-row')?.classList.toggle('changed', c);
+      if (c) n++;
+    }
+    for (const f of cardFiles(card)) if (motdsChanged(f.path)) n++;
+    $('[data-save]', card).disabled = !n;
+    $('[data-undo]', card).disabled = !n;
+    const tag = $('[data-dirty]', card);
+    tag.textContent = n ? `${n} unsaved` : '';
+    tag.classList.toggle('hidden', !n);
+  }
+
+  function remember(p) {
+    for (const f of p.files || []) {
+      if (f.error) continue;
+      files.set(f.path, { file: f, byLine: new Map(f.items.filter((x) => x.kind === 'value').map((x) => [x.line, x])) });
+      if (f.motds) motds.set(f.path, { list: f.motds.map((m) => ({ ...m })), saved: JSON.stringify(f.motds.map(({ icon: i, line1, line2 }) => [i, line1, line2])) });
+    }
+  }
+
+  function drawPlugin(p) {
+    const old = $(`[data-plugin="${p.id}"]`, el);
+    const tmp = document.createElement('div');
+    tmp.innerHTML = pluginHtml(p);
+    const card = tmp.firstElementChild;
+    old.replaceWith(card);
+    for (const f of p.files) if (f.motds) drawMotds(f.path, card);
+    markDirty(card);
+  }
+
+  function render() {
+    const installed = data.filter((p) => p.installed);
+    const missing = data.filter((p) => !p.installed);
+    el.innerHTML = `
+      <div class="stack">
+        <div class="row section-head" style="margin:0"><p class="sub" style="margin:0">Settings of the plugins below, saved straight to their config files (comments and everything else in them stay as they are). Most plugins read them when the server starts, so restart it after saving.</p>
+          <span class="spacer"></span><button type="button" class="btn btn-sm" data-reload>${icon('restart')}Reload</button></div>
+        ${installed.map((p) => `<div data-plugin="${p.id}"></div>`).join('') || `<div class="card empty-state"><p class="muted">None of the plugins this tab knows are installed here.</p></div>`}
+        ${
+          missing.length
+            ? `<p class="faint small">Also supported once installed: ${missing.map((p) => `<strong>${esc(p.name)}</strong>`).join(', ')}. <a href="#/server/${sid}/addons">Get plugins</a></p>`
+            : ''
+        }
+      </div>`;
+    for (const p of installed) drawPlugin(p);
+  }
+
+  async function load() {
+    try {
+      data = await api('GET', `/api/servers/${sid}/plugin-config`);
+    } catch (err) {
+      el.innerHTML = `<div class="card panel-card">${notice(esc(err.message), 'warn')}</div>`;
+      return;
+    }
+    files.clear();
+    motds.clear();
+    data.forEach(remember);
+    render();
+  }
+
+  async function save(card) {
+    const p = data.find((x) => x.id === card.dataset.plugin);
+    const byFile = new Map();
+    for (const input of $$('[data-cfg-line]', card)) {
+      const it = itemOf(input);
+      if (!it || !changed(input, it)) continue;
+      if (!byFile.has(input.dataset.file)) byFile.set(input.dataset.file, []);
+      byFile.get(input.dataset.file).push({ line: it.line, path: it.path, value: valueOf(input, it) });
+    }
+    for (const f of p.files) if (motdsChanged(f.path) && !byFile.has(f.path)) byFile.set(f.path, []);
+    const btn = $('[data-save]', card);
+    btn.disabled = true;
+    let ok = 0;
+    for (const [path, edits] of byFile) {
+      const st = motds.get(path);
+      try {
+        const r = await api('PUT', `/api/servers/${sid}/plugin-config`, {
+          file: path,
+          hash: files.get(path).file.hash,
+          edits,
+          ...(motdsChanged(path) ? { motds: st.list.map(({ icon: i, line1, line2 }) => ({ icon: i, line1, line2 })) } : {}),
+        });
+        p.files = p.files.map((f) => (f.path === path ? r.file : f));
+        ok++;
+      } catch (err) {
+        toast(`${path}: ${err.message}`, 'bad');
+      }
+    }
+    remember(p);
+    drawPlugin(p);
+    if (ok) toast(`${p.name} settings saved.${ctx.srv.pid ? ' Restart the server (or reload the plugin) to use them.' : ''}`, 'ok');
+  }
+
+  // Folding is remembered per server, in this browser. ('toggle' does not bubble, so listen while it travels down.)
+  el.addEventListener(
+    'toggle',
+    (e) => {
+      const k = e.target.dataset?.fold;
+      if (!k) return;
+      e.target.open ? opened.add(k) : opened.delete(k);
+      pref.set(foldKey, [...opened]);
+    },
+    true,
+  );
+  el.addEventListener('input', (e) => {
+    const card = e.target.closest('[data-plugin]');
+    if (!card) return;
+    const iconInput = e.target.closest('[data-motd-icon]');
+    if (iconInput) {
+      const path = iconInput.closest('[data-motds]').dataset.motds;
+      motds.get(path).list[Number(iconInput.dataset.motdIcon)].icon = iconInput.value.trim();
+    }
+    if (e.target.matches('[data-cfg-line], [data-motd-icon]')) markDirty(card);
+  });
+  el.addEventListener('change', (e) => {
+    const card = e.target.closest('[data-plugin]');
+    if (card && e.target.matches('[data-cfg-line]')) markDirty(card);
+  });
+  el.addEventListener('click', async (e) => {
+    const card = e.target.closest('[data-plugin]');
+    if (e.target.closest('[data-reload]')) return load();
+    const reveal = e.target.closest('[data-reveal]');
+    if (reveal) {
+      const input = reveal.previousElementSibling;
+      input.type = input.type === 'password' ? 'text' : 'password';
+      return;
+    }
+    const dir = e.target.closest('[data-open-dir]');
+    if (dir) {
+      pref.set(`cwd:${sid}`, dir.dataset.openDir); // the Files tab opens in that folder
+      return;
+    }
+    if (!card) return;
+    const add = e.target.closest('[data-motd-add]');
+    if (add) {
+      const st = motds.get(add.dataset.motdAdd);
+      st.list.push({ icon: st.list[0]?.icon || 'random', line1: '&b&lMy server', line2: '&7Come and play!', extra: [] });
+      drawMotds(add.dataset.motdAdd, card);
+      return markDirty(card);
+    }
+    const del = e.target.closest('[data-motd-del]');
+    if (del) {
+      const path = del.closest('[data-motds]').dataset.motds;
+      motds.get(path).list.splice(Number(del.dataset.motdDel), 1);
+      drawMotds(path, card);
+      return markDirty(card);
+    }
+    if (e.target.closest('[data-undo]')) {
+      const p = data.find((x) => x.id === card.dataset.plugin);
+      remember(p);
+      return drawPlugin(p);
+    }
+    if (e.target.closest('[data-save]')) return save(card);
+  });
+
+  load();
+  return {};
+}
+
 const TAB_VIEWS = {
   console: ConsoleTab,
   metrics: MetricsTab,
   players: PlayersTab,
   addons: AddonsTab,
+  pluginconfig: PluginConfigTab,
   files: FilesTab,
   properties: PropertiesTab,
   backups: BackupsTab,
@@ -4839,12 +5303,14 @@ function Ports(root) {
   root.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Admin</div><h1>Ports</h1><p>Every port the panel and its servers use: game ports, RCON and Query, and the ones plugins and mods open, such as BlueMap, Dynmap, Geyser and voice chat.</p></div>
       <div class="input-group all-search" style="width:min(440px, 100%)"><input class="input" id="ports-q" type="search" placeholder="Filter by port, server or use" autocomplete="off" spellcheck="false">
-      <div class="seg" id="ports-group" role="group" aria-label="Group by"><button type="button" data-group="server">By server</button><button type="button" data-group="port">By port</button></div>
+      <div class="seg" id="ports-group" role="group" aria-label="Group by"><button type="button" data-group="user">By user</button><button type="button" data-group="server">By server</button><button type="button" data-group="port">By port</button></div>
       <button class="btn" id="ports-refresh" style="height:40px">${icon('restart')}Refresh</button></div></div>
     <div id="ports-sum"></div>
     <div class="card table-wrap" id="ports-list"><p class="muted" style="padding:16px 20px">Checking ports...</p></div>`;
   let rows = null;
-  let group = pref.get('portsGroup', 'server');
+  let group = ['user', 'server', 'port'].includes(pref.get('portsGroup', 'server')) ? pref.get('portsGroup', 'server') : 'server';
+  // Folded users ('u:<owner>') and servers ('s:<server id>'), remembered in this browser.
+  const closed = new Set(pref.get('portsClosed', []));
   const q = $('#ports-q', root);
   // By server: the panel first, then servers in sidebar order (others' servers after yours), each by port.
   const serverRank = () => {
@@ -4853,7 +5319,8 @@ function Ports(root) {
   };
 
   function statusCell(r) {
-    if (r.proto === 'udp') return `<span class="pill">${r.running ? 'Server running' : 'Server stopped'}</span><div class="faint small">UDP, not checked</div>`;
+    if (r.status === 'udp')
+      return `<span class="pill">${r.running ? 'Server running' : 'Server stopped'}</span><div class="faint small" title="UDP has no connection to try, and this one only answers its own clients">UDP, cannot be checked</div>`;
     const [cls, label] = r.status === 'taken' && r.clash ? ['bad', 'Port in use'] : PORT_STATUS[r.status] || ['', r.status];
     return `<span class="pill ${cls}"><span class="dot ${cls}"></span>${label}</span>`;
   }
@@ -4862,10 +5329,19 @@ function Ports(root) {
     if (!rows) return;
     const term = q.value.trim().toLowerCase();
     const shown = rows.filter((r) => !term || `${r.port} ${r.proto} ${r.server} ${r.owner || ''} ${r.what} ${r.file || ''}`.toLowerCase().includes(term));
-    const byServer = group === 'server';
-    if (byServer) {
+    const grouped = group !== 'port';
+    const byUser = group === 'user';
+    const ownerKey = (r) => (r.serverId ? r.owner || '' : '\u0000panel');
+    if (grouped) {
       const rank = serverRank();
-      shown.sort((a, b) => rank(a.serverId) - rank(b.serverId) || a.port - b.port); // rows come sorted by port
+      // By user: the panel, you, servers without an owner, then everyone else by name.
+      const ownerRank = (k) => (k === '\u0000panel' ? 0 : k === me().id ? 1 : k === '' ? 2 : 3);
+      shown.sort(
+        (a, b) =>
+          (byUser ? ownerRank(ownerKey(a)) - ownerRank(ownerKey(b)) || ownerKey(a).localeCompare(ownerKey(b)) : 0) ||
+          rank(a.serverId) - rank(b.serverId) ||
+          a.port - b.port, // rows come sorted by port
+      );
     }
     $$('[data-group]', root).forEach((b) => b.classList.toggle('active', b.dataset.group === group));
     const serverCell = (r) =>
@@ -4876,34 +5352,56 @@ function Ports(root) {
       clashes ? notice(`<strong>${clashes} port${clashes === 1 ? ' is' : 's are'} set for more than one thing.</strong> Only one can use a port at a time; change the others in their config files.`, 'warn') : '',
       taken ? notice(`<strong>${taken} port${taken === 1 ? ' is' : 's are'} already taken by another program</strong> while its server is stopped. That server will fail to start until the program is closed or the port is changed.`, 'warn') : '',
     ].join('');
-    $('#ports-list', root).innerHTML = shown.length
-      ? `<table class="table ports-table">
-          <thead><tr><th>Port</th><th>Protocol</th>${byServer ? '' : '<th>Server</th>'}<th>Used for</th><th>Set in</th><th>Status</th></tr></thead>
-          <tbody>${shown
-            .map(
-              (r, n) => `${
-                byServer && (n === 0 || shown[n - 1].serverId !== r.serverId)
-                  ? `<tr class="group-row"><td colspan="5"><div class="row" style="gap:10px">${
-                      r.serverId ? `<a href="#/server/${r.serverId}">${esc(r.server)}</a>` : `<strong>${esc(r.server)}</strong>`
-                    }${r.owner ? `<span class="faint small">${esc(r.owner)}</span>` : ''}</div></td></tr>`
-                  : ''
-              }
+    // While filtering, everything that matches shows, folded or not.
+    const isClosed = (k) => !term && closed.has(k);
+    const toggle = (k, label) =>
+      `<button type="button" class="icon-btn grp-toggle" data-grp="${esc(k)}" aria-expanded="${!isClosed(k)}" title="${isClosed(k) ? 'Unfold' : 'Fold'}" aria-label="${isClosed(k) ? 'Unfold' : 'Fold'} ${esc(label)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+    const portsOf = (pick) => shown.filter(pick).length;
+    const out = [];
+    shown.forEach((r, n) => {
+      const prev = shown[n - 1];
+      const uk = `u:${ownerKey(r)}`;
+      const sk = `s:${r.serverId || 'panel'}`;
+      if (byUser && (!prev || ownerKey(prev) !== ownerKey(r))) {
+        const mine = shown.filter((x) => ownerKey(x) === ownerKey(r));
+        const servers = new Set(mine.filter((x) => x.serverId).map((x) => x.serverId)).size;
+        const who = !r.serverId ? 'WebbMC panel' : r.owner || 'No owner (admins)';
+        out.push(`<tr class="group-row user-row"><td colspan="5"><div class="row" style="gap:8px">${toggle(uk, who)}<strong>${esc(who)}</strong>${
+          r.serverId && r.owner === me().id ? '<span class="tag">You</span>' : ''
+        }<span class="faint small">${r.serverId ? `${servers} server${servers === 1 ? '' : 's'}, ` : ''}${mine.length} port${mine.length === 1 ? '' : 's'}</span></div></td></tr>`);
+      }
+      if (byUser && isClosed(uk)) return;
+      // By user, the panel's own row needs no server heading under its user heading.
+      if (grouped && (!prev || prev.serverId !== r.serverId || (byUser && ownerKey(prev) !== ownerKey(r))) && !(byUser && !r.serverId)) {
+        const count = portsOf((x) => x.serverId === r.serverId);
+        out.push(`<tr class="group-row ${byUser ? 'sub' : ''}"><td colspan="5"><div class="row" style="gap:8px">${toggle(sk, r.server)}${
+          r.serverId ? `<a href="#/server/${r.serverId}">${esc(r.server)}</a>` : `<strong>${esc(r.server)}</strong>`
+        }${!byUser && r.owner ? `<span class="faint small">${esc(r.owner)}</span>` : ''}<span class="faint small">${count} port${count === 1 ? '' : 's'}</span></div></td></tr>`);
+      }
+      if (grouped && !(byUser && !r.serverId) && isClosed(sk)) return;
+      out.push(`
             <tr class="${r.clash ? 'clash' : ''}">
               <td class="port"><span class="row" style="gap:6px;flex-wrap:nowrap"><span${r.locked ? ` title="${esc(r.locked)}"` : ''}>${r.port}</span>${
-                r.locked
-                  ? ''
-                  : `<button class="icon-btn" data-edit-port="${rows.indexOf(r)}" title="Change this port">${icon('edit')}</button>`
+                r.locked ? '' : `<button class="icon-btn" data-edit-port="${rows.indexOf(r)}" title="Change this port">${icon('edit')}</button>`
               }</span></td>
               <td><span class="proto">${r.proto}</span></td>
-              ${byServer ? '' : `<td>${serverCell(r)}</td>`}
+              ${grouped ? '' : `<td>${serverCell(r)}</td>`}
               <td>${esc(r.what)}${r.public ? `<div class="faint small">Players join at <span class="mono">${esc(r.public)}</span></div>` : ''}${
                 r.clash ? `<div class="clash-note">${icon('warn')}<span>Also set for ${r.clash.map(esc).join(', ')}</span></div>` : ''
               }</td>
               <td>${r.file ? `<span class="mono small">${esc(r.file)}</span>` : `<span class="faint small">${esc(r.note || (r.serverId ? '' : 'WEBMC_PORT'))}</span>`}</td>
               <td>${statusCell(r)}</td>
-            </tr>`,
-            )
-            .join('')}</tbody>
+            </tr>`);
+    });
+    const anyGroups = grouped && shown.some((r) => r.serverId);
+    $('#ports-list', root).innerHTML = shown.length
+      ? `${
+          anyGroups
+            ? `<div class="row ports-fold"><button type="button" class="btn btn-sm btn-ghost" data-fold-all="1">Fold all</button><button type="button" class="btn btn-sm btn-ghost" data-fold-all="0">Unfold all</button></div>`
+            : ''
+        }<table class="table ports-table">
+          <thead><tr><th>Port</th><th>Protocol</th>${grouped ? '' : '<th>Server</th>'}<th>Used for</th><th>Set in</th><th>Status</th></tr></thead>
+          <tbody>${out.join('')}</tbody>
         </table>`
       : `<div class="empty-state"><p class="muted">${term ? 'No port matches.' : 'No ports yet.'}</p></div>`;
   }
@@ -4937,7 +5435,24 @@ function Ports(root) {
   };
   $('#ports-list', root).onclick = (e) => {
     const b = e.target.closest('[data-edit-port]');
-    if (b && rows) editPort(rows[Number(b.dataset.editPort)]);
+    if (b && rows) return editPort(rows[Number(b.dataset.editPort)]);
+    const g = e.target.closest('[data-grp]');
+    if (g) {
+      closed.has(g.dataset.grp) ? closed.delete(g.dataset.grp) : closed.add(g.dataset.grp);
+      pref.set('portsClosed', [...closed]);
+      render();
+      $(`[data-grp="${CSS.escape(g.dataset.grp)}"]`, root)?.focus();
+      return;
+    }
+    const all = e.target.closest('[data-fold-all]');
+    if (all && rows) {
+      closed.clear();
+      // Fold all: the users when grouping by user, otherwise the servers.
+      if (all.dataset.foldAll === '1')
+        for (const r of rows) if (r.serverId) closed.add(group === 'user' ? `u:${r.owner || ''}` : `s:${r.serverId}`);
+      pref.set('portsClosed', [...closed]);
+      render();
+    }
   };
   q.oninput = render;
   $('#ports-refresh', root).onclick = load;
