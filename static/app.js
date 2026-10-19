@@ -1718,6 +1718,8 @@ function AddonsTab(el, ctx) {
     badge.title = n ? `${n} update${n === 1 ? '' : 's'} available` : '';
   };
   const statusCell = (u) => {
+    if (u.status === 'update' && u.switchTo)
+      return `<span class="pill warn" title="This file is built for another server type; ${esc(u.switchTo)} has its own build of the same release"><span class="dot warn"></span>${esc(u.switchTo)} build: ${esc(u.latest)}</span>`;
     if (u.status === 'update') return `<span class="pill warn" title="${esc(u.note || '')}"><span class="dot warn"></span>Update: ${esc(u.latest)}</span>`;
     if (u.status === 'latest') return `<span class="pill ok" title="${esc(u.note || '')}"><span class="dot ok"></span>Latest${u.note ? ' *' : ''}</span>`;
     if (u.status === 'error') return `<span class="pill bad" title="${esc(u.error)}"><span class="dot bad"></span>Could not check</span>`;
@@ -1766,7 +1768,11 @@ function AddonsTab(el, ctx) {
             <td>${statusCell(u)}${u.note && u.status !== 'unknown' ? `<div class="faint small">${esc(u.note)}</div>` : ''}</td>
             <td><label class="switch" title="${u.enabled ? 'Disable' : 'Enable'}"><input type="checkbox" data-toggle="${esc(u.path)}" ${u.enabled ? 'checked' : ''}><span class="track"></span></label></td>
             <td class="actions">${
-              u.action ? `<button type="button" class="btn btn-sm btn-accent" data-update="${i}" title="Update ${esc(u.version)} to ${esc(u.latest)}">${icon('download')}Update</button>` : ''
+              !u.action
+                ? ''
+                : u.switchTo
+                  ? `<button type="button" class="btn btn-sm btn-accent" data-update="${i}" title="Replace ${esc(u.version)} with ${esc(u.latest)}">${icon('download')}Switch to ${esc(u.switchTo)}</button>`
+                  : `<button type="button" class="btn btn-sm btn-accent" data-update="${i}" title="Update ${esc(u.version)} to ${esc(u.latest)}">${icon('download')}Update</button>`
             }${u.page ? `<a class="icon-btn" href="${esc(u.page)}" target="_blank" rel="noopener" title="Open the project page">${icon('external')}</a>` : ''}<button class="icon-btn danger" data-del="${esc(
               u.path,
             )}" data-name="${esc(u.title)}" title="Delete">${icon('trash')}</button></td></tr>`,
