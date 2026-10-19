@@ -124,11 +124,11 @@ The panel runs only while you are signed in and the PC is awake. To keep servers
 
 ### Quick install with the script
 
-`install-linux.sh` does every step below for you. **WebbMC is installed into the folder the script is in**, so make a folder, put the script in it and run it as your normal user (it asks for your password when it needs `sudo`):
+[`installer/install-linux.sh`](installer/install-linux.sh) does every step below for you. **WebbMC is installed into the folder the script is in**, so make a folder, put the script in it and run it as your normal user (it asks for your password when it needs `sudo`):
 
 ```bash
 mkdir ~/webbmc && cd ~/webbmc
-curl -fsSLO https://raw.githubusercontent.com/web-beck/WebbMC/main/install-linux.sh
+curl -fsSLO https://raw.githubusercontent.com/web-beck/WebbMC/main/installer/install-linux.sh
 bash install-linux.sh
 ```
 

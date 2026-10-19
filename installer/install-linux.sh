@@ -4,8 +4,10 @@
 # WebbMC is installed into the folder this file is in. Make a folder, put this file in it, and run it:
 #
 #   mkdir ~/webbmc && cd ~/webbmc
-#   curl -fsSLO https://raw.githubusercontent.com/web-beck/WebbMC/main/install-linux.sh
+#   curl -fsSLO https://raw.githubusercontent.com/web-beck/WebbMC/main/installer/install-linux.sh
 #   bash install-linux.sh
+#
+# In a WebbMC folder it lives in installer/: run from there, it updates the WebbMC folder above it.
 #
 # (On a desktop you can also double-click it: it opens a terminal.) It asks a few questions first (version, port, admin
 # account, Google sign-in, pm2), then installs Node.js and Git when they are missing, downloads WebbMC next to itself,
@@ -153,6 +155,11 @@ EOF
     SELF=$(basename "$script_path")
   else
     DIR=$(pwd -P) # piped into bash: the current folder
+  fi
+  # The copy in a WebbMC folder's installer/: WebbMC is the folder above.
+  if [[ $(basename "$DIR") == installer && -f $DIR/../server.js ]]; then
+    DIR=$(cd "$DIR/.." && pwd -P)
+    SELF=''
   fi
   # WebbMC runs as you, or when this runs as root, as the owner of the folder.
   local RUN_USER RUN_HOME
@@ -442,6 +449,8 @@ EOF
     fi
     g checkout -q -f -B "$BRANCH" "origin/$BRANCH"
     g branch -q --set-upstream-to="origin/$BRANCH"
+    # The downloaded copy of this script is not needed now: WebbMC has its own in installer/ (bash has read this file).
+    if [[ -n $SELF && -f $DIR/$SELF ]] && ! g ls-files --error-unmatch -- "$SELF" >/dev/null 2>&1; then rm -f "$DIR/$SELF"; fi
     echo "  $(g log -1 --format='%h %s')"
   fi
 
@@ -644,7 +653,7 @@ EOF
   else
     echo "  Start it:  cd '$DIR' && node server.js   (Ctrl+C stops it and its Minecraft servers)"
   fi
-  echo "  Update:    bash '$DIR/install-linux.sh'   (or use the bell in the panel)"
+  echo "  Update:    bash '$DIR/installer/install-linux.sh'   (or use the bell in the panel)"
   if [[ -n $FW ]] && ((!OPEN_FW)) && ((FRESH)); then
     echo
     echo "  The $FW firewall is on. Players can join after: $([[ $FW == ufw ]] && echo 'sudo ufw allow 25565/tcp' || echo 'sudo firewall-cmd --permanent --add-port=25565/tcp && sudo firewall-cmd --reload')"

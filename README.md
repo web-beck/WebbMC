@@ -63,7 +63,7 @@ The installer does everything: it installs Node.js and Git when they're missing 
 
 ```bash
 mkdir ~/webbmc && cd ~/webbmc
-curl -fsSLO https://raw.githubusercontent.com/web-beck/WebbMC/main/install-linux.sh
+curl -fsSLO https://raw.githubusercontent.com/web-beck/WebbMC/main/installer/install-linux.sh
 bash install-linux.sh
 ```
 
@@ -99,7 +99,7 @@ To let players join over the internet, use **playit.gg** (built in, no router ch
 
 ### Updating
 
-Admins see new versions under the **bell**. **Stop servers and update** pulls the update, stops the servers, restarts the panel and starts the servers that were running. From a terminal, stop the panel, run `git pull` and start it again. On Linux you can also run `bash install-linux.sh` again. Your servers, worlds, backups and accounts live in `data/`, which updates never touch.
+Admins see new versions under the **bell**. **Stop servers and update** pulls the update, stops the servers, restarts the panel and starts the servers that were running. From a terminal, stop the panel, run `git pull` and start it again. On Linux you can also run `bash installer/install-linux.sh` again. Your servers, worlds, backups and accounts live in `data/`, which updates never touch.
 
 A full walkthrough with troubleshooting is in **[initial-startup.md](initial-startup.md)**.
 
