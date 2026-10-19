@@ -271,6 +271,8 @@ const myServers = () => {
     .sort((a, b) => a.k - b.k)
     .map((x) => x.s);
 };
+/** Your sidebar folders ([{ id, name, ids }], top to bottom); a move just made wins for a few seconds, as above. */
+const myFolders = () => (state.serverOrder && Date.now() - state.serverOrder.at < 8000 ? state.serverOrder.folders : me().serverFolders) || [];
 /** Who a server belongs to: on servers shared with you, and for admins on servers that are not theirs. */
 const ownerChip = (s) =>
   s.access === 'shared'
@@ -393,18 +395,38 @@ function renderChrome() {
   $$('.brand-name').forEach((el) => (el.innerHTML = nameHtml));
   document.title = `${panel.name} Server Panel`;
 
-  const navHtml = servers.length
-    ? servers
-        .map(
-          (s) => `
-      <a href="#/server/${s.id}" data-sid="${s.id}" draggable="false">
-        ${servers.length > 1 ? `<span class="grip" data-grip tabindex="0" role="button" title="Drag to move" aria-label="Move ${esc(s.name)}: drag, or press the up and down arrow keys">${icon('grip')}</span>` : ''}
+  // Servers in no folder first, then each folder's header and its servers (hidden while it is folded). One flat list,
+  // so dragging a server past a folder header moves it into that folder.
+  const folders = myFolders();
+  const folderOf = new Map(folders.flatMap((f) => f.ids.map((id) => [id, f.id])));
+  const closed = new Set(pref.get('closedFolders', []));
+  const movable = servers.length > 1 || folders.length > 0;
+  const link = (s, inFolder, hidden) => `
+      <a href="#/server/${s.id}" data-sid="${s.id}" draggable="false" class="${inFolder ? 'in-folder' : ''}" ${hidden ? 'hidden' : ''}>
+        ${movable ? `<span class="grip" data-grip tabindex="0" role="button" title="Drag to move, or into a folder" aria-label="Move ${esc(s.name)}: drag, or press the up and down arrow keys">${icon('grip')}</span>` : ''}
         <span class="nm"><span class="dot ${statusInfo(s).cls}"></span><span>${esc(s.name)}</span></span>
         <span class="faint small">${s.pid ? `${s.playerCount}/${s.maxPlayers}` : ''}</span>
-      </a>`,
-        )
-        .join('')
-    : `<div class="empty">${me().admin && state.overview.servers.length ? 'None of your own. See All servers.' : 'No servers yet'}</div>`;
+      </a>`;
+  const folderHead = (f, count, open) => `
+      <div class="folder-head" data-folder="${esc(f.id)}">
+        <button type="button" class="folder-toggle" data-folder-toggle aria-expanded="${open}" title="${open ? 'Fold' : 'Unfold'} ${esc(f.name)}">
+          <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          ${icon('folder')}<span class="fname">${esc(f.name)}</span><span class="faint small">${count}</span>
+        </button>
+        <button type="button" class="icon-btn" data-folder-rename title="Rename folder" aria-label="Rename ${esc(f.name)}">${icon('edit')}</button>
+        <button type="button" class="icon-btn danger" data-folder-delete title="Delete folder (its servers stay)" aria-label="Delete ${esc(f.name)}">${icon('trash')}</button>
+      </div>`;
+  const navHtml =
+    servers.length || folders.length
+      ? [
+          ...servers.filter((s) => !folderOf.has(s.id)).map((s) => link(s, false, false)),
+          ...folders.flatMap((f) => {
+            const inside = servers.filter((s) => folderOf.get(s.id) === f.id);
+            const open = !closed.has(f.id);
+            return [folderHead(f, inside.length, open), ...inside.map((s) => link(s, true, !open))];
+          }),
+        ].join('')
+      : `<div class="empty">${me().admin && state.overview.servers.length ? 'None of your own. See All servers.' : 'No servers yet'}</div>`;
   // Rebuild only when something changed, and never in the middle of a drag; keep the keyboard focus where it was.
   if (!reorder.active && navHtml !== serverNavHtml) {
     const nav = $('#server-nav');
@@ -476,29 +498,89 @@ setNavCollapsed(pref.get('navCollapsed', false));
 // account, so every device shows it, and the dashboard lists your servers in the same order.
 let serverNavHtml = '';
 const reorder = { active: false };
-const navIds = () => $$('#server-nav [data-sid]').map((a) => a.dataset.sid);
+/** The sidebar as it stands: server ids top to bottom, and each folder with the servers below its header. */
+function navLayout(folders = myFolders()) {
+  const out = folders.map((f) => ({ id: f.id, name: f.name, ids: [] }));
+  const byId = new Map(out.map((f) => [f.id, f]));
+  const ids = [];
+  let inside = null;
+  for (const el of $('#server-nav').children) {
+    if (el.dataset.folder) inside = byId.get(el.dataset.folder) || null;
+    else if (el.dataset.sid) {
+      ids.push(el.dataset.sid);
+      inside?.ids.push(el.dataset.sid);
+    }
+  }
+  return { ids, folders: out };
+}
 
-function saveServerOrder(ids) {
-  state.serverOrder = { ids, at: Date.now() };
+function saveServerOrder({ ids, folders }) {
+  state.serverOrder = { ids, folders, at: Date.now() };
   renderChrome();
   current?.update?.();
-  api('PUT', '/api/account/server-order', { order: ids })
+  api('PUT', '/api/account/server-order', { order: ids, folders })
     .then((r) => {
-      if (state.overview?.me) state.overview.me.serverOrder = r.serverOrder;
+      if (state.overview?.me) Object.assign(state.overview.me, { serverOrder: r.serverOrder, serverFolders: r.serverFolders });
     })
     .catch((err) => toast(`Could not save the order: ${err.message}`, 'bad'));
 }
 
+// The servers of a folded folder are in the list but hidden: a drag or arrow key skips over them, taking them along
+// with their folder header, so they stay in their folder.
+const shown = (el, dir) => {
+  while (el?.hidden) el = el[dir];
+  return el;
+};
+function passUp(item, sib) {
+  const run = [];
+  for (let n = sib; n !== item; n = n.nextElementSibling) run.push(n);
+  item.after(...run);
+}
+function passDown(item, sib) {
+  const run = [];
+  for (let n = item.nextElementSibling; n; n = n.nextElementSibling) {
+    run.push(n);
+    if (n === sib) break;
+  }
+  item.before(...run);
+}
+
 const serverNav = $('#server-nav');
-serverNav.addEventListener('click', (e) => {
+serverNav.addEventListener('click', async (e) => {
   if (e.target.closest('[data-grip]')) e.preventDefault(); // the handle moves the server; it does not open it
+  const head = e.target.closest('[data-folder]');
+  if (!head) return;
+  const id = head.dataset.folder;
+  const folders = myFolders();
+  const f = folders.find((x) => x.id === id);
+  if (!f) return;
+  if (e.target.closest('[data-folder-toggle]')) {
+    const closed = new Set(pref.get('closedFolders', []));
+    closed.has(id) ? closed.delete(id) : closed.add(id);
+    pref.set('closedFolders', [...closed]);
+    renderChrome();
+  } else if (e.target.closest('[data-folder-rename]')) {
+    const name = (await promptBox('Rename folder', 'Name', f.name, { confirmText: 'Rename' }))?.trim();
+    if (name && name !== f.name) saveServerOrder(navLayout(folders.map((x) => (x.id === id ? { ...x, name } : x))));
+  } else if (e.target.closest('[data-folder-delete]')) {
+    saveServerOrder(navLayout(folders.filter((x) => x.id !== id)));
+    toast(`Deleted the folder ${f.name}. Its servers are still here.`, 'ok');
+  }
 });
+$('#servers-label').insertAdjacentHTML('beforeend', `<button type="button" class="icon-btn" id="new-folder" title="New folder" aria-label="New folder">${icon('newFolder')}</button>`);
+$('#new-folder').onclick = async () => {
+  const name = (await promptBox('New folder', 'Name', '', { confirmText: 'Create' }))?.trim();
+  if (!name) return;
+  const folders = [...myFolders(), { id: Math.random().toString(36).slice(2, 10), name, ids: [] }];
+  saveServerOrder(navLayout(folders));
+  toast('Folder created. Drag servers into it by their handle.', 'ok');
+};
 serverNav.addEventListener('pointerdown', (e) => {
   const grip = e.target.closest('[data-grip]');
   if (!grip || e.button !== 0) return;
   e.preventDefault();
   const item = grip.closest('[data-sid]');
-  const before = navIds().join();
+  const before = JSON.stringify(navLayout());
   reorder.active = true;
   item.classList.add('dragging');
   serverNav.classList.add('reordering');
@@ -513,8 +595,8 @@ serverNav.addEventListener('pointerdown', (e) => {
     if (ev.clientY < sb.top + 40) sidebar.scrollTop -= 12;
     else if (ev.clientY > sb.bottom - 40) sidebar.scrollTop += 12;
     let sib;
-    while ((sib = item.previousElementSibling) && ev.clientY < mid(sib)) serverNav.insertBefore(sib, item.nextElementSibling);
-    while ((sib = item.nextElementSibling) && ev.clientY > mid(sib)) serverNav.insertBefore(sib, item);
+    while ((sib = shown(item.previousElementSibling, 'previousElementSibling')) && ev.clientY < mid(sib)) passUp(item, sib);
+    while ((sib = shown(item.nextElementSibling, 'nextElementSibling')) && ev.clientY > mid(sib)) passDown(item, sib);
   };
   const end = () => {
     document.removeEventListener('pointermove', move);
@@ -524,7 +606,7 @@ serverNav.addEventListener('pointerdown', (e) => {
     serverNav.classList.remove('reordering');
     document.body.classList.remove('dragging-server');
     reorder.active = false;
-    if (navIds().join() !== before) saveServerOrder(navIds());
+    if (JSON.stringify(navLayout()) !== before) saveServerOrder(navLayout());
   };
   document.addEventListener('pointermove', move);
   document.addEventListener('pointerup', end);
@@ -536,11 +618,11 @@ serverNav.addEventListener('keydown', (e) => {
   e.preventDefault();
   const item = grip.closest('[data-sid]');
   const up = e.key === 'ArrowUp';
-  const sib = up ? item.previousElementSibling : item.nextElementSibling;
+  const sib = up ? shown(item.previousElementSibling, 'previousElementSibling') : shown(item.nextElementSibling, 'nextElementSibling');
   if (!sib) return;
   // Move the neighbour past it, so the handle keeps the keyboard focus.
-  serverNav.insertBefore(sib, up ? item.nextElementSibling : item);
-  saveServerOrder(navIds());
+  up ? passUp(item, sib) : passDown(item, sib);
+  saveServerOrder(navLayout());
 });
 
 // ================================================================ notifications (the bell, top right)
@@ -4357,11 +4439,18 @@ function Ports(root) {
   root.innerHTML = `
     <div class="page-head"><div><div class="eyebrow">Admin</div><h1>Ports</h1><p>Every port the panel and its servers use: game ports, RCON and Query, and the ones plugins and mods open, such as BlueMap, Dynmap, Geyser and voice chat.</p></div>
       <div class="input-group all-search" style="width:min(440px, 100%)"><input class="input" id="ports-q" type="search" placeholder="Filter by port, server or use" autocomplete="off" spellcheck="false">
+      <div class="seg" id="ports-group" role="group" aria-label="Group by"><button type="button" data-group="server">By server</button><button type="button" data-group="port">By port</button></div>
       <button class="btn" id="ports-refresh" style="height:40px">${icon('restart')}Refresh</button></div></div>
     <div id="ports-sum"></div>
     <div class="card table-wrap" id="ports-list"><p class="muted" style="padding:16px 20px">Checking ports...</p></div>`;
   let rows = null;
+  let group = pref.get('portsGroup', 'server');
   const q = $('#ports-q', root);
+  // By server: the panel first, then servers in sidebar order (others' servers after yours), each by port.
+  const serverRank = () => {
+    const ids = [...new Set([...myServers(), ...(state.overview?.servers || [])].map((s) => s.id))];
+    return (id) => (id ? (ids.includes(id) ? ids.indexOf(id) : ids.length) : -1);
+  };
 
   function statusCell(r) {
     if (r.proto === 'udp') return `<span class="pill">${r.running ? 'Server running' : 'Server stopped'}</span><div class="faint small">UDP, not checked</div>`;
@@ -4373,6 +4462,14 @@ function Ports(root) {
     if (!rows) return;
     const term = q.value.trim().toLowerCase();
     const shown = rows.filter((r) => !term || `${r.port} ${r.proto} ${r.server} ${r.owner || ''} ${r.what} ${r.file || ''}`.toLowerCase().includes(term));
+    const byServer = group === 'server';
+    if (byServer) {
+      const rank = serverRank();
+      shown.sort((a, b) => rank(a.serverId) - rank(b.serverId) || a.port - b.port); // rows come sorted by port
+    }
+    $$('[data-group]', root).forEach((b) => b.classList.toggle('active', b.dataset.group === group));
+    const serverCell = (r) =>
+      r.serverId ? `<a href="#/server/${r.serverId}">${esc(r.server)}</a>${r.owner ? `<div class="faint small">${esc(r.owner)}</div>` : ''}` : `<strong>${esc(r.server)}</strong>`;
     const clashes = new Set(rows.filter((r) => r.clash).map((r) => `${r.port}/${r.proto}`)).size;
     const taken = rows.filter((r) => r.status === 'taken' && !r.clash).length;
     $('#ports-sum', root).innerHTML = [
@@ -4381,10 +4478,16 @@ function Ports(root) {
     ].join('');
     $('#ports-list', root).innerHTML = shown.length
       ? `<table class="table ports-table">
-          <thead><tr><th>Port</th><th>Protocol</th><th>Server</th><th>Used for</th><th>Set in</th><th>Status</th></tr></thead>
+          <thead><tr><th>Port</th><th>Protocol</th>${byServer ? '' : '<th>Server</th>'}<th>Used for</th><th>Set in</th><th>Status</th></tr></thead>
           <tbody>${shown
             .map(
-              (r) => `
+              (r, n) => `${
+                byServer && (n === 0 || shown[n - 1].serverId !== r.serverId)
+                  ? `<tr class="group-row"><td colspan="5"><div class="row" style="gap:10px">${
+                      r.serverId ? `<a href="#/server/${r.serverId}">${esc(r.server)}</a>` : `<strong>${esc(r.server)}</strong>`
+                    }${r.owner ? `<span class="faint small">${esc(r.owner)}</span>` : ''}</div></td></tr>`
+                  : ''
+              }
             <tr class="${r.clash ? 'clash' : ''}">
               <td class="port"><span class="row" style="gap:6px;flex-wrap:nowrap"><span${r.locked ? ` title="${esc(r.locked)}"` : ''}>${r.port}</span>${
                 r.locked
@@ -4392,11 +4495,7 @@ function Ports(root) {
                   : `<button class="icon-btn" data-edit-port="${rows.indexOf(r)}" title="Change this port">${icon('edit')}</button>`
               }</span></td>
               <td><span class="proto">${r.proto}</span></td>
-              <td>${
-                r.serverId
-                  ? `<a href="#/server/${r.serverId}">${esc(r.server)}</a>${r.owner ? `<div class="faint small">${esc(r.owner)}</div>` : ''}`
-                  : `<strong>${esc(r.server)}</strong>`
-              }</td>
+              ${byServer ? '' : `<td>${serverCell(r)}</td>`}
               <td>${esc(r.what)}${r.public ? `<div class="faint small">Players join at <span class="mono">${esc(r.public)}</span></div>` : ''}${
                 r.clash ? `<div class="clash-note">${icon('warn')}<span>Also set for ${r.clash.map(esc).join(', ')}</span></div>` : ''
               }</td>
@@ -4421,8 +4520,6 @@ function Ports(root) {
     const where = r.serverId ? `${r.server}: ${r.what}` : 'the WebbMC panel';
     const value = await promptBox(`Change port for ${where}`, `New ${r.proto.toUpperCase()} port (now ${r.port})`, String(r.port), { confirmText: 'Change' });
     if (!value || Number(value) === r.port) return;
-    if (!r.serverId && !(await confirmBox(`Move the panel to port ${value}?`, `This saves WEBMC_PORT=${value} in .env. After the panel restarts it answers on port ${value} only, so open it there.`, { confirmText: 'Move' })))
-      return;
     try {
       const res = await api('PUT', '/api/ports', { serverId: r.serverId, key: r.key, port: Number(value) });
       toast(`${r.what} now uses port ${value}.${res.restart ? ` ${res.restart}` : ''}`, 'ok');
@@ -4431,6 +4528,13 @@ function Ports(root) {
       toast(err.message, 'bad');
     }
   }
+  $('#ports-group', root).onclick = (e) => {
+    const b = e.target.closest('[data-group]');
+    if (!b) return;
+    group = b.dataset.group;
+    pref.set('portsGroup', group);
+    render();
+  };
   $('#ports-list', root).onclick = (e) => {
     const b = e.target.closest('[data-edit-port]');
     if (b && rows) editPort(rows[Number(b.dataset.editPort)]);

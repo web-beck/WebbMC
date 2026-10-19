@@ -460,7 +460,7 @@ route('PUT', '/api/settings', ({ body }) => {
 // Your own account
 route('GET', '/api/account', ({ user }) => auth.accountInfo(user));
 route('PATCH', '/api/account', ({ req, res, user, body }) => auth.updateAccount(req, res, user, body));
-route('PUT', '/api/account/server-order', ({ user, body }) => auth.setServerOrder(user, body.order));
+route('PUT', '/api/account/server-order', ({ user, body }) => auth.setServerOrder(user, body.order, body.folders));
 route('POST', '/api/account/password', ({ req, res, user, body }) => auth.setOwnPassword(req, res, user, body));
 route('POST', '/api/account/google/unlink', ({ user }) => auth.unlinkGoogle(user));
 route('POST', '/api/account/sign-out-everywhere', ({ req, res, user }) => auth.signOutEverywhere(req, res, user));

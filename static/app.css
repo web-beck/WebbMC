@@ -130,6 +130,22 @@ svg { width: 18px; height: 18px; fill: currentColor; flex: none; }
 body.dragging-server, body.dragging-server * { cursor: grabbing !important; user-select: none; }
 .server-nav .nm { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .server-nav .nm span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.server-nav [hidden] { display: none !important; }
+.server-nav a.in-folder { padding-left: 30px; }
+.folder-head { display: flex; align-items: center; gap: 2px; margin-top: 4px; }
+.folder-toggle { all: unset; box-sizing: border-box; flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 10px; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); transition: background 0.15s, color 0.15s; }
+.folder-toggle:hover { background: var(--surface-2); color: var(--fg); }
+.folder-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.folder-toggle svg { width: 15px; height: 15px; flex: none; color: var(--secondary-soft); }
+.folder-toggle .chev { color: var(--faint); transition: transform 0.2s; }
+.folder-toggle[aria-expanded="false"] .chev { transform: rotate(-90deg); }
+.folder-toggle .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-toggle .small { margin-left: auto; }
+.folder-head .icon-btn, #new-folder { width: 26px; height: 26px; opacity: 0; transition: opacity 0.15s; }
+.folder-head:hover .icon-btn, .folder-head .icon-btn:focus-visible, #servers-label:hover #new-folder, #new-folder:focus-visible { opacity: 1; }
+@media (hover: none) { .folder-head .icon-btn, #new-folder { opacity: 0.6; } }
+#servers-label { display: flex; align-items: center; justify-content: space-between; }
+@media (prefers-reduced-motion: reduce) { .folder-toggle .chev { transition: none; } }
 .server-nav .empty { padding: 6px 12px; color: var(--faint); font-size: 13px; }
 .side-foot { margin-top: auto; padding: 14px 12px 0; border-top: 1px solid var(--line); display: grid; gap: 8px; font-size: 12px; color: var(--muted); }
 .side-foot .row { display: flex; justify-content: space-between; gap: 8px; }
@@ -643,6 +659,7 @@ a.notif-item:hover { background: var(--surface-2); }
 
 /* ------------------------------------------------------------ ports */
 .ports-table td.port { font: 600 14px var(--font-mono); white-space: nowrap; }
+.ports-table tr.group-row td { background: var(--surface-2); font-weight: 600; padding-top: 8px; padding-bottom: 8px; }
 .ports-table tr.clash td { background: color-mix(in srgb, var(--warn) 7%, transparent); }
 .ports-table .clash-note { display: flex; gap: 6px; align-items: flex-start; color: var(--warn); font-size: 12px; margin-top: 3px; }
 .ports-table .clash-note svg { width: 14px; height: 14px; flex: none; margin-top: 2px; }
