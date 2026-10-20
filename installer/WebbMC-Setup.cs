@@ -436,9 +436,13 @@ class SetupForm : Form
         otpBox.Text = otp ?? "";
         otpUser.Text = "Username:  " + admin.Text.Trim();
         runText.Location = new Point(32, otp != null ? 290 : 150);
-        runText.Text = startNow.Checked
-            ? "WebbMC is running in its own window. To stop it, press Ctrl+C in that window (not the X), which stops your Minecraft servers cleanly first.\n\nNext time, start it with the WebbMC shortcut on your desktop."
-            : "Start it any time with the WebbMC shortcut on your desktop.";
+        // The WebbMC app is built from the downloaded files; without it, WebbMC runs in a terminal window instead.
+        bool app = File.Exists(Path.Combine(Path.GetFullPath(folder.Text.Trim()), "WebbMC.exe"));
+        runText.Text = !startNow.Checked
+            ? "Start it any time with the WebbMC shortcut on your desktop."
+            : app
+                ? "WebbMC is running in its own window. Closing that window keeps it running in the system tray; its Stop button stops it, and your Minecraft servers with it, cleanly.\n\nNext time, start it with the WebbMC shortcut on your desktop."
+                : "WebbMC is running in a terminal window. To stop it, press Ctrl+C in that window (not the X), which stops your Minecraft servers cleanly first.\n\nNext time, start it with the WebbMC shortcut on your desktop.";
         Show(3);
     }
 
@@ -463,7 +467,9 @@ class SetupForm : Form
     {
         if (url == null) return;
         string health = url.Replace("localhost", "127.0.0.1").TrimEnd('/') + "/api/health";
-        string bat = Path.Combine(Path.GetFullPath(folder.Text.Trim()), "start-webbmc.bat");
+        string home = Path.GetFullPath(folder.Text.Trim());
+        string bat = Path.Combine(home, "WebbMC.exe");
+        if (!File.Exists(bat)) bat = Path.Combine(home, "start-webbmc.bat");
         next.Enabled = false;
         next.Text = "Starting...";
         Thread th = new Thread(() =>

@@ -30,10 +30,10 @@ Then it does the rest:
 1. Installs **Node.js** and **Git** with `winget` when they're missing.
 2. Downloads WebbMC.
 3. Creates the admin account and prints its **one-time password**.
-4. Puts a **WebbMC** shortcut on your desktop.
-5. Starts the panel and opens **http://localhost:8420** in your browser.
+4. Sets up the **WebbMC app** with a shortcut on your desktop.
+5. Starts WebbMC and gives you its address, **http://localhost:8420**.
 
-Afterwards, start WebbMC with the desktop shortcut, and stop it with **Ctrl+C** in its window, which stops every Minecraft server cleanly first. Don't close the window with the X. **To update, run WebbMC-Setup.exe again and pick the same folder** (or use the bell in the panel).
+WebbMC runs in its own window: its status and address, **Open WebbMC**, **Stop** and **Restart**, and the log. Closing the window keeps it running in the **system tray**, where right-clicking its icon opens or stops it. **Stop** stops every Minecraft server cleanly first. Start it again with the desktop shortcut. **To update, run WebbMC-Setup.exe again and pick the same folder** (or use the bell in the panel).
 
 <details><summary>Install by hand instead</summary>
 
@@ -298,4 +298,4 @@ An admin can run servers, edit files and choose which Java to launch, which is e
 
 ## Stopping the panel
 
-Press **Ctrl+C** (or use `pm2 stop webbmc` / `systemctl stop webbmc`). WebbMC sends `stop` to every running server, waits up to 45 seconds, then exits. Killing the Node process any other way can leave Java processes running; the panel warns about them on its next start.
+On Windows, use **Stop** in the WebbMC app (or **Exit** in its tray menu). In a terminal, press **Ctrl+C** (or use `pm2 stop webbmc` / `systemctl stop webbmc`). WebbMC sends `stop` to every running server, waits up to 45 seconds, then exits. Killing the Node process any other way can leave Java processes running; the panel warns about them on its next start.

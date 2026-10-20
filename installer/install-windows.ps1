@@ -168,25 +168,46 @@ function Install-WebbMC {
     if ($m) { $Port = [int]$m.Matches[0].Groups[1].Value }
   }
 
-  # ---- Start file and shortcuts ----------------------------------------------------------------------------
+  # ---- The WebbMC app, start file and shortcuts -------------------------------------------------------------
+  # WebbMC.exe (installer\WebbMC.cs) runs the panel in a window of its own, with a tray icon. It is built here with the
+  # C# compiler that ships with Windows, on every install and update (it is not in git, so updates never have to
+  # replace a running exe). start-webbmc.bat stays as the plain way to start WebbMC in a terminal.
   $bat = Join-Path $Dir 'start-webbmc.bat'
   if (-not (Test-Path $bat)) {
     $text = "@echo off`r`ntitle WebbMC`r`ncd /d `"%~dp0`"`r`necho Starting WebbMC. Press Ctrl+C here to stop it (and its Minecraft servers) cleanly.`r`nnode server.js`r`npause`r`n"
     [IO.File]::WriteAllText($bat, $text, (New-Object Text.ASCIIEncoding))
   }
+  $app = Join-Path $Dir 'WebbMC.exe'
+  $appSrc = Join-Path $Dir 'installer\WebbMC.cs'
+  $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+  if (-not (Test-Path $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
+  if ((Test-Path $csc) -and (Test-Path $appSrc)) {
+    Say 'Building the WebbMC app'
+    $ErrorActionPreference = 'Continue'
+    $built = & $csc /nologo /target:winexe /optimize+ "/out:$app" "/win32icon:$Dir\static\favicon.ico" "/resource:$Dir\static\favicon.png,favicon.png" $appSrc 2>&1 | Out-String
+    $ok = $LASTEXITCODE -eq 0
+    $ErrorActionPreference = 'Stop'
+    if (-not $ok) {
+      if ($built -match 'being used by another process') { Note 'The WebbMC app is open, so it keeps its current version. Close it (Exit in its tray menu) and run setup again to update it.' }
+      else { Note "Could not build the WebbMC app, so the shortcuts use start-webbmc.bat. $($built.Trim())" }
+    }
+  }
+  $useApp = Test-Path $app
   $shell = New-Object -ComObject WScript.Shell
-  function Make-Shortcut($path) {
+  function Make-Shortcut($path, $arguments) {
     $s = $shell.CreateShortcut($path)
-    $s.TargetPath = $bat
+    if ($useApp) { $s.TargetPath = $app; $s.Arguments = $arguments } else { $s.TargetPath = $bat; $s.Arguments = '' }
     $s.WorkingDirectory = $Dir
+    $s.Description = 'WebbMC Minecraft server panel'
     $icon = Join-Path $Dir 'static\favicon.ico'
     if (Test-Path $icon) { $s.IconLocation = $icon }
     $s.Save()
   }
-  if (-not $Update) {
-    Make-Shortcut (Join-Path ([Environment]::GetFolderPath('Desktop')) 'WebbMC.lnk')
-    if ($AtLogin) { Make-Shortcut (Join-Path ([Environment]::GetFolderPath('Startup')) 'WebbMC.lnk') }
-  }
+  $desktopLink = Join-Path ([Environment]::GetFolderPath('Desktop')) 'WebbMC.lnk'
+  $startupLink = Join-Path ([Environment]::GetFolderPath('Startup')) 'WebbMC.lnk'
+  # The Startup one starts WebbMC quietly in the tray. An update points existing shortcuts at the app.
+  if (-not $Update -or (Test-Path $desktopLink)) { Make-Shortcut $desktopLink '' }
+  if ((-not $Update -and $AtLogin) -or ($Update -and (Test-Path $startupLink))) { Make-Shortcut $startupLink '--tray' }
 
   # ---- Done ------------------------------------------------------------------------------------------------
   Say "WebbMC is $(if ($Update) { 'up to date' } else { 'installed' }) in $Dir"
@@ -198,15 +219,16 @@ function Install-WebbMC {
     Note 'It works once within 24 hours; then you choose your own password.'
   }
   Write-Host ''
-  Write-Host '  Start it:  double-click "WebbMC" on your desktop (or start-webbmc.bat in the folder)'
-  Write-Host '  Stop it:   press Ctrl+C in its window. Do not close the window with the X: that can leave Minecraft running.'
+  Write-Host '  Start it:  double-click "WebbMC" on your desktop'
+  if ($useApp) { Write-Host '  Stop it:   the Stop button in the WebbMC window, or right-click its tray icon. Closing the window keeps it running.' }
+  else { Write-Host '  Stop it:   press Ctrl+C in its window. Do not close the window with the X: that can leave Minecraft running.' }
   Write-Host '  Update:    run WebbMC-Setup.exe again and pick this folder, or use the bell in the panel'
   if ($Update) {
-    Note 'If WebbMC is running, stop it with Ctrl+C in its window and start it again to use the update.'
+    Note 'If WebbMC is running, restart it (Restart in the WebbMC window) to use the update.'
     return
   }
   if (YesNo 'Start WebbMC now?' ($env:WEBBMC_START -ne '0')) {
-    Start-Process -FilePath $bat -WorkingDirectory $Dir
+    if ($useApp) { Start-Process -FilePath $app -WorkingDirectory $Dir } else { Start-Process -FilePath $bat -WorkingDirectory $Dir }
     Write-Host -NoNewline '  Waiting for the panel'
     for ($i = 0; $i -lt 45; $i++) {
       try {

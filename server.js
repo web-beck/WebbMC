@@ -673,7 +673,8 @@ server.listen(PORT, HOST, () => {
   }
   if (!auth.hasAdmin()) console.log('  No admin yet: the first account created on the sign-in page becomes the admin.');
   console.log('  Forgot the admin password? Run "node reset-admin.js" in this folder for a one-time password.');
-  console.log('  Press Ctrl+C to stop the panel (running servers are stopped cleanly).\n');
+  if (process.env.WEBMC_STDIN_CONTROL === '1') console.log('  Stop it with Stop in this window (running servers are stopped cleanly).\n');
+  else console.log('  Press Ctrl+C to stop the panel (running servers are stopped cleanly).\n');
 });
 
 let shuttingDown = false;
@@ -684,7 +685,12 @@ async function shutdown(reason, code = 0) {
     process.exit(1);
   }
   shuttingDown = true;
-  const why = { update: 'Updated. Stopping servers to restart the panel...', restart: 'Restarting. Stopping servers first...' };
+  const why = {
+    update: 'Updated. Stopping servers to restart the panel...',
+    restart: 'Restarting. Stopping servers first...',
+    stop: 'Stopping. Stopping servers first...',
+    'app-closed': 'The WebbMC app closed. Stopping servers...',
+  };
   console.log(`\n[webbmc] ${why[reason] || `${reason} received. Stopping servers...`}`);
   server.close();
   await manager.stopAll(45000);
@@ -694,5 +700,13 @@ async function shutdown(reason, code = 0) {
 }
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
+// The Windows app (WebbMC.exe) runs the panel without a terminal, where Ctrl+C cannot reach it: it writes "stop"
+// instead. When the app goes away (its pipe closes), the panel stops too, so it is never left running unseen.
+if (process.env.WEBMC_STDIN_CONTROL === '1') {
+  require('readline')
+    .createInterface({ input: process.stdin })
+    .on('line', (line) => line.trim() === 'stop' && !shuttingDown && shutdown('stop'))
+    .on('close', () => !shuttingDown && shutdown('app-closed'));
+}
 process.on('uncaughtException', (err) => console.error('[webbmc] Uncaught error:', err));
 process.on('unhandledRejection', (err) => console.error('[webbmc] Unhandled rejection:', err));

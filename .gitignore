@@ -4,3 +4,5 @@ node_modules/
 .env
 ecosystem.config.cjs
 info.md
+# Built on each Windows PC by the installer (installer/WebbMC.cs)
+/WebbMC.exe

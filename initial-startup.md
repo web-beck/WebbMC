@@ -32,8 +32,10 @@ It asks for the folder, version (stable or development), port, admin username an
 1. Installs Node.js and Git with `winget` when they're missing.
 2. Downloads WebbMC and writes `.env`.
 3. Creates the admin account and prints its **one-time password**.
-4. Makes `start-webbmc.bat` and a **WebbMC** shortcut on your desktop (and in Startup, if you chose to start with Windows).
-5. Starts the panel and opens it in your browser.
+4. Sets up the **WebbMC app** with a shortcut on your desktop (and in Startup, if you chose to start with Windows; that one starts WebbMC quietly in the system tray).
+5. Starts WebbMC and gives you its address.
+
+The WebbMC app shows WebbMC's status, address and log, with **Open WebbMC**, **Stop** and **Restart**. Closing its window keeps WebbMC running in the system tray (right-click the icon to open or stop it). **Stop** stops every Minecraft server cleanly first.
 
 To update, run it again and pick the same folder. Then skip to [First sign-in and first server](#first-sign-in-and-first-server).
 
