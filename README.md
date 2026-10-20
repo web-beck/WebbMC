@@ -81,7 +81,7 @@ Install Node.js and Git (for example `brew install node git`), then follow the W
 
 ### Docker and Railway
 
-There's a `Dockerfile` (Node.js plus Java 25, 21 and 17) and a `railway.json`. See [Deploy on Railway](#deploy-on-railway).
+There's a `Dockerfile` (Node.js plus Java 25, 21 and 17) and a `railway.json`. See [Deploy on Railway](#deploy-on-railway), or deploy in one click with the [Railway template](https://railway.com/deploy/webbmc-minecraft-server-hoster).
 
 ### First sign-in
 
@@ -273,6 +273,10 @@ data/
 **Accounts are a convenience, not a sandbox.** Every server runs as the same operating-system user as the panel, and plugins are ordinary Java programs that can read other servers' files. Only give access to people you trust. That's why approval is the default.
 
 ## Deploy on Railway
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/webbmc-minecraft-server-hoster)
+
+The button sets up the volume, domain and TCP Proxy for you. Create your account right after it deploys (the first account is the admin). To set it up by hand instead:
 
 Railway builds from the root of this repository using the `Dockerfile` (Node.js plus Java 25, 21 and 17).
 
