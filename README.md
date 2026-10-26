@@ -1,6 +1,6 @@
 # WebbMC
 
-A self-hosted Minecraft server panel, in the spirit of Crafty Controller. Run Paper, Purpur, Fabric, Vanilla, Velocity and BungeeCord servers from one web page: live console, plugins and their settings, files, backups, schedules, players and ports.
+A self-hosted Minecraft server panel, in the spirit of Crafty Controller. Run Paper, Purpur, Fabric, Forge, NeoForge, Vanilla, Velocity and BungeeCord servers and CurseForge modpacks from one web page: live console, plugins and their settings, files, backups, schedules, players and ports.
 
 - **No npm dependencies.** Just Node.js. Java is downloaded for you, in the version each server needs.
 - **Runs anywhere:** Windows, Linux, macOS, Docker or Railway.
@@ -103,7 +103,8 @@ A full walkthrough with troubleshooting is in **[initial-startup.md](initial-sta
 
 ### Servers
 
-- **Create servers** from Paper, Purpur, Fabric or Vanilla (the jar is downloaded for you), a custom jar you upload, or an existing server folder you import.
+- **Create servers** from Paper, Purpur, Fabric or Vanilla (the jar is downloaded for you), Forge or NeoForge (the installer is downloaded and run for you), a custom jar you upload, or an existing server folder you import.
+- **Modpacks**: upload a CurseForge server pack zip and WebbMC unpacks it, works out its loader and Minecraft version (from manifest.json, variables.txt, server-setup-config.yaml, an installer in the pack or what is already installed), installs Forge, NeoForge or Fabric, and starts it. A CurseForge export (manifest.json and overrides) also works when `CURSEFORGE_API_KEY` is set, since its mods have to be downloaded. Mods whose authors turned off third-party downloads are listed in the console to fetch by hand.
 - **Proxies:** create **Velocity** or **BungeeCord** servers to put several servers behind one address. Their **Properties** tab edits the servers behind the proxy:
   - add, rename and delete servers, with a one-click add for your own servers
   - the order players start in (`try` / `priorities`)
@@ -230,6 +231,7 @@ Settings come from environment variables. On your own computer, put them in a fi
 | `WEBMC_DATA` | Railway volume, else `./data` | Where servers, backups and `panel.json` live |
 | `WEBMC_ALLOWED_HOSTS` | (none) | Comma-separated hostnames allowed to reach the panel, such as `mc.example.com` |
 | `GITHUB_TOKEN` | (none) | Optional. Raises GitHub's limit (60 requests an hour per IP without one) for GitHub and EssentialsX installs and update checks |
+| `CURSEFORGE_API_KEY` | (none) | Optional. Lets modpack uploads download the mods a CurseForge export lists (free at console.curseforge.com). Server packs do not need it |
 | `WEBMC_NO_SUPERVISOR` | (unset) | `1` runs the panel without its restart helper (updates then stop the panel instead of restarting it). Not needed under pm2 |
 | `WEBMC_WEBHOOK_SECRET` | (none) | Turns on the GitHub push webhook at `/api/update/webhook` for instant update notices |
 | `WEBMC_PLAYIT_SOCKET` | (the usual place) | Where a playit you installed yourself listens, if you start it with its own `--socket-path` |

@@ -26,6 +26,7 @@ const files = require('./lib/files');
 const backups = require('./lib/backups');
 const scheduler = require('./lib/scheduler');
 const providers = require('./lib/providers');
+const modpack = require('./lib/modpack');
 const properties = require('./lib/properties');
 const addons = require('./lib/addons');
 const serverIcon = require('./lib/icon');
@@ -244,6 +245,20 @@ route('POST', '/api/servers/:id/install', ({ inst, body }) => {
   inst.assertIdle('change its software');
   inst.install(body.type, String(body.version)).catch(() => {});
 });
+// A modpack zip (a CurseForge server pack or export), sent as the request body. It installs in the background, with
+// progress in the console.
+route(
+  'PUT',
+  '/api/servers/:id/modpack',
+  async ({ inst, query, req }) => {
+    const file = await modpack.receive(inst, req);
+    modpack
+      .install(inst, file, query.get('name') || '')
+      .then(() => query.get('start') === '1' && inst.start().catch((e) => inst.panel(`Start failed: ${e.message}`)))
+      .catch(() => {}); // the console says what went wrong
+  },
+  { rawBody: true },
+);
 
 route('GET', '/api/servers/:id/players', ({ inst }) => {
   const read = (f) => {

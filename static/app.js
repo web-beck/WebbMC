@@ -303,8 +303,25 @@ async function fillUserList() {
   }
 }
 
-const TYPE_LABEL = { paper: 'Paper', purpur: 'Purpur', fabric: 'Fabric', vanilla: 'Vanilla', custom: 'Custom jar', import: 'Imported', velocity: 'Velocity', bungeecord: 'BungeeCord' };
-const softwareLabel = (s) => `${TYPE_LABEL[s.type] || s.type}${s.version === 'latest' ? ' (latest build)' : s.version ? ` ${s.version}` : ''}`;
+const TYPE_LABEL = {
+  paper: 'Paper',
+  purpur: 'Purpur',
+  fabric: 'Fabric',
+  forge: 'Forge',
+  neoforge: 'NeoForge',
+  vanilla: 'Vanilla',
+  custom: 'Custom jar',
+  modpack: 'Modpack',
+  import: 'Imported',
+  velocity: 'Velocity',
+  bungeecord: 'BungeeCord',
+  quilt: 'Quilt',
+};
+// A modpack shows its own name and loader: "All the Mods 9 (NeoForge 1.20.1)".
+const softwareLabel = (s) =>
+  s.type === 'modpack'
+    ? `${s.packName || 'Modpack'}${s.loader?.type || s.version ? ` (${[TYPE_LABEL[s.loader?.type], s.version].filter(Boolean).join(' ')})` : ''}`
+    : `${TYPE_LABEL[s.type] || s.type}${s.version === 'latest' ? ' (latest build)' : s.version ? ` ${s.version}` : ''}`;
 const serverAddress = (s) => s.publicAddress || `${location.hostname || 'localhost'}:${s.port}`;
 
 function statusInfo(s) {
@@ -1306,13 +1323,16 @@ const SOFTWARE = [
   { type: 'paper', name: 'Paper', desc: 'Fast and stable, runs Bukkit/Spigot plugins. Best for most servers.', color: '#39ff14', letter: 'P' },
   { type: 'purpur', name: 'Purpur', desc: 'A Paper fork with extra gameplay and config options.', color: '#c99bff', letter: 'Pu' },
   { type: 'fabric', name: 'Fabric', desc: 'Lightweight mod loader for Fabric mods.', color: '#ffc857', letter: 'F' },
+  { type: 'forge', name: 'Forge', desc: 'The classic mod loader. Runs Forge mods.', color: '#e0773c', letter: 'Fo' },
+  { type: 'neoforge', name: 'NeoForge', desc: 'The modern Forge fork most new modpacks use.', color: '#f0a35e', letter: 'N' },
+  { type: 'modpack', name: 'Modpack', desc: 'Upload a CurseForge server pack (.zip). WebbMC installs its loader.', color: '#f16436', letter: 'M' },
   { type: 'vanilla', name: 'Vanilla', desc: 'The official Mojang server. No plugins or mods.', color: '#ededed', letter: 'V' },
-  { type: 'custom', name: 'Custom jar', desc: 'Bring your own jar: Forge, NeoForge, Spigot and others.', color: '#e07ad6', letter: 'J' },
+  { type: 'custom', name: 'Custom jar', desc: 'Bring your own jar: Spigot, Mohist and others.', color: '#e07ad6', letter: 'J' },
   { type: 'import', name: 'Import folder', desc: 'Manage a server folder that already exists on this machine.', color: '#5ce1e6', letter: 'I' },
   { type: 'velocity', name: 'Velocity', desc: 'Modern proxy: link several servers behind one address. Velocity plugins.', color: '#09add3', letter: 'Ve', proxy: true },
   { type: 'bungeecord', name: 'BungeeCord', desc: 'The classic proxy for linking servers. BungeeCord plugins.', color: '#f2a93b', letter: 'B', proxy: true },
 ];
-const DOWNLOADABLE = ['paper', 'purpur', 'fabric', 'vanilla', 'velocity', 'bungeecord'];
+const DOWNLOADABLE = ['paper', 'purpur', 'fabric', 'forge', 'neoforge', 'vanilla', 'velocity', 'bungeecord'];
 const PROXY_TYPES = ['velocity', 'bungeecord'];
 
 async function fillVersions(select, type) {
@@ -1360,6 +1380,8 @@ function NewServer(root) {
           <div class="field" data-not="import"><label for="ns-port">Port</label><input class="input" id="ns-port" name="port" type="number" min="1" max="65535"><span class="hint" id="ns-port-hint">Players connect to this port. 25565 is the default.</span></div>
           <div class="field" data-for="import"><label for="ns-dir">Existing server folder</label><input class="input mono" id="ns-dir" name="importDir" placeholder="C:\\Minecraft\\my-server"><span class="hint">Full path on the machine running WebbMC.</span></div>
           <div class="field" data-for="import"><label for="ns-jar">Jar file (optional)</label><input class="input mono" id="ns-jar" name="jar" placeholder="Detected automatically"></div>
+          <div class="field" data-for="modpack"><label for="ns-pack">Modpack zip</label><input class="input" id="ns-pack" name="pack" type="file" accept=".zip,application/zip">
+            <span class="hint">On the pack's CurseForge page, open Files and download its <strong>Server Pack</strong>. A CurseForge export with manifest.json works too when CURSEFORGE_API_KEY is set.</span></div>
           ${
             me().admin
               ? `<div class="field"><label for="ns-owner">Owner</label><input class="input" id="ns-owner" name="owner" list="user-list" value="${esc(me().id)}" autocomplete="off" spellcheck="false">
@@ -1414,6 +1436,9 @@ function NewServer(root) {
     $$('.soft', form).forEach((b) => b.classList.toggle('selected', b.dataset.type === type));
     $$('[data-for="download"]', form).forEach((el) => el.classList.toggle('hidden', !DOWNLOADABLE.includes(type)));
     $$('[data-for="import"]', form).forEach((el) => el.classList.toggle('hidden', type !== 'import'));
+    $$('[data-for="modpack"]', form).forEach((el) => el.classList.toggle('hidden', type !== 'modpack'));
+    // Modpacks rarely run in less than 6 GB, if the machine has room for it.
+    if (type === 'modpack' && totalMb >= 8192 && Number(form.elements.maxRam.value) < 6144) setRam(form, 'maxRam', 6144);
     $$('[data-not="import"]', form).forEach((el) => el.classList.toggle('hidden', type === 'import'));
     const proxy = PROXY_TYPES.includes(type);
     $$('[data-game]', form).forEach((el) => el.classList.toggle('hidden', proxy));
@@ -1463,10 +1488,23 @@ function NewServer(root) {
     };
     if (!body.name.trim()) return toast('Give the server a name', 'bad');
     if (type !== 'import' && !PROXY_TYPES.includes(type) && !body.eula) return toast('You need to accept the Minecraft EULA', 'bad');
+    const pack = type === 'modpack' ? f.pack.files[0] : null;
+    if (type === 'modpack' && !pack) return toast('Pick the modpack zip to upload', 'bad');
+    if (pack) body.startAfter = false; // the server starts once the pack is installed instead
     const btn = $('#ns-submit');
     btn.disabled = true;
     try {
       const srv = await api('POST', '/api/servers', body);
+      if (pack) {
+        try {
+          await putFile(`/api/servers/${srv.id}/modpack?name=${enc(pack.name)}${f.startAfter.checked ? '&start=1' : ''}`, pack, (p) => (btn.textContent = `Uploading... ${Math.round(p * 100)}%`));
+        } catch (err) {
+          toast(`${srv.name} was created, but the modpack upload failed: ${err.message}`, 'bad');
+          await poll();
+          location.hash = `#/server/${srv.id}/console`;
+          return;
+        }
+      }
       toast(`Created ${srv.name}`, 'ok');
       await poll();
       location.hash = `#/server/${srv.id}/console`;
@@ -2050,8 +2088,8 @@ function PlayersTab(el, ctx) {
 // ---------------------------------------------------------------- plugins / mods tab
 
 const addonLabel = (s) =>
-  s.type === 'fabric' ? 'Mods' : s.type === 'vanilla' ? 'Datapacks' : ['custom', 'import'].includes(s.type) ? 'Add-ons' : 'Plugins';
-const LOADER_NAME = { paper: 'Paper', purpur: 'Purpur', fabric: 'Fabric', velocity: 'Velocity', bungeecord: 'BungeeCord' };
+  ['fabric', 'forge', 'neoforge', 'modpack'].includes(s.type) ? 'Mods' : s.type === 'vanilla' ? 'Datapacks' : ['custom', 'import'].includes(s.type) ? 'Add-ons' : 'Plugins';
+const LOADER_NAME = { paper: 'Paper', purpur: 'Purpur', fabric: 'Fabric', forge: 'Forge', neoforge: 'NeoForge', quilt: 'Quilt', velocity: 'Velocity', bungeecord: 'BungeeCord' };
 
 const SOURCE_LABEL = { modrinth: 'Modrinth', hangar: 'Hangar', essentialsx: 'EssentialsX', geysermc: 'GeyserMC', github: 'GitHub', link: 'Link' };
 const fmtCount = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${+(n / 1e3).toFixed(1)}k` : String(n || 0));
@@ -2687,9 +2725,14 @@ function AddonsTab(el, ctx) {
 const BINARY_EXT = /\.(jar|zip|gz|tgz|tar|7z|rar|dat|dat_old|mca|mcr|nbt|png|jpe?g|gif|webp|ico|db|sqlite|lock|exe|dll|so|class|ogg|mp3|wav)$/i;
 
 function uploadFile(id, path, file, onProgress) {
+  return putFile(`/api/servers/${id}/files/upload?path=${enc(path)}`, file, onProgress);
+}
+
+/** PUT a file as the request body, with upload progress (fetch has none). */
+function putFile(url, file, onProgress = () => {}) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('PUT', `/api/servers/${id}/files/upload?path=${enc(path)}`);
+    xhr.open('PUT', url);
     xhr.setRequestHeader('X-WebMC', '1');
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
     xhr.onload = () => {
@@ -4516,7 +4559,7 @@ function ServerSettingsTab(el, ctx) {
   };
 
   // What is installed against the newest build of the same version, and any newer Minecraft version.
-  const softName = `${TYPE_LABEL[s.type] || s.type}${s.version && s.version !== 'latest' ? ` ${s.version}` : ''}`;
+  const softName = s.type === 'modpack' ? softwareLabel(s) : `${TYPE_LABEL[s.type] || s.type}${s.version && s.version !== 'latest' ? ` ${s.version}` : ''}`;
   const buildOf = (b) => (b?.build != null ? `build ${b.build}` : '');
   const dateOf = (b) => (b?.time ? `<span class="faint small">${new Date(b.time).toLocaleDateString(undefined, { dateStyle: 'medium' })}</span>` : '');
   function renderSoft(st) {
@@ -4530,6 +4573,10 @@ function ServerSettingsTab(el, ctx) {
       rows.push(`<div class="soft-row"><span class="lbl">Newest</span><div><strong>${esc(softName)}</strong> <span class="mono">${esc(buildOf(st.latest))}</span> ${dateOf(st.latest)}</div><span class="spacer"></span>${action}</div>`);
     } else if (st.known && s.type === 'fabric') {
       rows.push(`<div class="soft-row"><span class="lbl">Newest</span><div class="faint small">Fabric does not number its server jars. Installing the same version again gets the newest Fabric loader.</div><span class="spacer"></span><button type="button" class="btn btn-sm" data-soft-update>${icon('restart')}Reinstall ${esc(softName)}</button></div>`);
+    } else if (s.type === 'modpack') {
+      rows.push(`<p class="faint small" style="margin:0">This server runs a modpack${s.loader?.version ? ` on ${esc(TYPE_LABEL[s.loader.type] || s.loader.type)} ${esc(s.loader.version)}` : ''}. To update it, make a backup and upload the new version's server pack into the folder in the Files tab. Installing other software below replaces the mod loader the pack was made for.</p>`);
+    } else if (['forge', 'neoforge'].includes(s.type)) {
+      rows.push(`<div class="soft-row"><span class="lbl">Loader</span><div class="faint small">${esc(TYPE_LABEL[s.type])} ${esc(s.loaderVersion || '')}${s.argsFile ? ` &middot; starts with <span class="mono">@${esc(s.argsFile)}</span>` : ''}. Installing the same version again gets the newest ${s.type === 'forge' ? 'recommended ' : ''}build.</div><span class="spacer"></span><button type="button" class="btn btn-sm" data-soft-update>${icon('restart')}Reinstall ${esc(softName)}</button></div>`);
     } else if (!st.known) {
       rows.push(`<p class="faint small" style="margin:0">This server runs a jar WebbMC did not download (a custom or imported one), so it cannot check it for updates. Pick a software below to switch to one WebbMC can keep up to date.</p>`);
     } else rows.push(`<p class="faint small" style="margin:0">Could not check for a newer build right now. Try again later.</p>`);
