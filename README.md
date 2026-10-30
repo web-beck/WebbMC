@@ -141,6 +141,7 @@ A full walkthrough with troubleshooting is in **[initial-startup.md](initial-sta
   - DNS and SRV records, and Mojang's block list
   - Query data and Forge mod lists
   - favorites you can see at a glance
+  - **Xbox friends** (optional, needs `XBOX_CLIENT_ID`): connect a Microsoft account to see who is online, follow gamertags, and list the Bedrock worlds your friends broadcast. Follow your MCXboxBroadcast account to check it shows in the Friends tab
 
 ### Plugins, mods and their settings
 
@@ -235,6 +236,7 @@ Settings come from environment variables. On your own computer, put them in a fi
 | `WEBMC_NO_SUPERVISOR` | (unset) | `1` runs the panel without its restart helper (updates then stop the panel instead of restarting it). Not needed under pm2 |
 | `WEBMC_WEBHOOK_SECRET` | (none) | Turns on the GitHub push webhook at `/api/update/webhook` for instant update notices |
 | `WEBMC_PLAYIT_SOCKET` | (the usual place) | Where a playit you installed yourself listens, if you start it with its own `--socket-path` |
+| `XBOX_CLIENT_ID` | (none) | Optional. Turns on **Xbox friends** on the Server status page. Register an app at [entra.microsoft.com](https://entra.microsoft.com/) → App registrations, for *Personal Microsoft accounts only*, and turn on *Authentication → Allow public client flows* (no secret or redirect URI). Use its Application (client) ID |
 | `WEBMC_JAVA_PATHS` | (none) | Comma-separated Java executables to offer in each server's Java field |
 
 Everything else (panel name, default Java, default RAM, who may sign in, Java downloads) is set in **Panel settings**.

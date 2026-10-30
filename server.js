@@ -31,6 +31,7 @@ const properties = require('./lib/properties');
 const addons = require('./lib/addons');
 const serverIcon = require('./lib/icon');
 const mcstatus = require('./lib/mcstatus');
+const xbox = require('./lib/xbox');
 const motd = require('./lib/motd');
 const pluginconfig = require('./lib/pluginconfig');
 const proxycfg = require('./lib/proxycfg');
@@ -437,6 +438,13 @@ route('DELETE', '/api/status/favorites', ({ query, user }) => {
   store.save();
   return myFavorites(user);
 });
+// Xbox friends on the status page: each account connects its own Microsoft account.
+route('GET', '/api/xbox', ({ user }) => xbox.status(user));
+route('POST', '/api/xbox/connect', ({ user }) => xbox.connect(user));
+route('DELETE', '/api/xbox', ({ user }) => xbox.disconnect(user));
+route('GET', '/api/xbox/friends', ({ user }) => xbox.friends(user));
+route('POST', '/api/xbox/friends', ({ user, body }) => xbox.follow(user, body.gamertag));
+route('DELETE', '/api/xbox/friends', ({ user, query }) => xbox.unfollow(user, query.get('xuid')));
 
 // Panel
 route('GET', '/api/versions', ({ query }) => providers.listVersions(query.get('type')));

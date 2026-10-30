@@ -5217,7 +5217,9 @@ function StatusPage(root, args = []) {
       <div class="row" style="margin-bottom:14px"><h2>Favorites</h2><span class="tag" id="st-fav-count">0</span><span class="spacer"></span>
         <button class="btn btn-sm btn-ghost" id="st-fav-refresh">${icon('restart')}Refresh</button></div>
       <div class="fav-grid" id="st-favs"><p class="muted">Loading...</p></div>
-    </section>`;
+    </section>
+    <section class="section" id="st-xbox"></section>`;
+  const stopXbox = xboxSection($('#st-xbox', root));
 
   const form = $('#st-form', root);
   let edition = pref.get('statusEdition', 'java') === 'bedrock' ? 'bedrock' : 'java';
@@ -5513,7 +5515,171 @@ function StatusPage(root, args = []) {
   setEdition(edition);
   loadFavorites();
   show(args);
-  return { statusPage: true, show, destroy: () => clearInterval(obf) };
+  return {
+    statusPage: true,
+    show,
+    destroy: () => {
+      clearInterval(obf);
+      stopXbox();
+    },
+  };
+}
+
+/** Server status page: this account's Xbox friends and the Bedrock sessions they broadcast, so an MCXboxBroadcast
+ * account can be checked from here. Returns a function that stops refreshing. */
+function xboxSection(box) {
+  let st = null;
+  let friends = null;
+  let busy = false;
+  const pill = (cls, label) => `<span class="pill ${cls}"><span class="dot ${cls}"></span>${esc(label)}</span>`;
+  const head = (extra = '') =>
+    `<div class="row" style="margin-bottom:14px"><h2>Xbox friends</h2>${extra}<span class="spacer"></span>${
+      st?.connected
+        ? `<button class="btn btn-sm btn-ghost" data-xbox="refresh">${icon('restart')}Refresh</button><button class="btn btn-sm btn-ghost" data-xbox="disconnect">${icon('logout')}Disconnect</button>`
+        : ''
+    }</div>`;
+  const intro =
+    '<p class="sub">Connect a Microsoft account to see which friends are online and the Bedrock worlds and servers they broadcast. Follow your MCXboxBroadcast account to check that it shows up in the Friends tab.</p>';
+
+  function render() {
+    if (!st.configured)
+      return (box.innerHTML = `${head()}<div class="card panel-card stack-sm">${intro}${notice(
+        'Needs <span class="mono">XBOX_CLIENT_ID</span> in <strong>Panel settings → .env</strong>: a free Azure app registration. The README explains the steps.',
+      )}</div>`);
+    if (st.pending) {
+      const p = st.pending;
+      return (box.innerHTML = `${head(pill('warn', 'Waiting for sign-in'))}<div class="card panel-card stack-sm">
+        <p><strong>Open the Microsoft page and enter this code.</strong> Sign in with the account whose friends you want to see.</p>
+        <div class="row"><a class="btn btn-accent" href="${esc(p.uri)}" target="_blank" rel="noopener">${icon('external')}Open ${esc(p.uri.replace(/^https?:\/\//, ''))}</a>
+          <span class="addr otp">${esc(p.code)}<button type="button" data-copy="${esc(p.code)}" title="Copy code">${icon('copy')}</button></span></div>
+        <p class="row muted small"><span class="spin"></span>This updates by itself once you sign in.</p>
+        <div class="row"><button class="btn btn-sm btn-ghost" data-xbox="disconnect">Cancel</button></div></div>`);
+    }
+    if (!st.connected)
+      return (box.innerHTML = `${head()}<div class="card panel-card stack-sm">${intro}${st.error ? notice(esc(st.error), 'warn') : ''}
+        <div class="row"><button class="btn btn-accent" data-xbox="connect">${icon('link')}Connect Microsoft account</button></div></div>`);
+    const f = friends;
+    const online = f?.people?.filter((p) => p.online).length ?? 0;
+    const sessions = !f
+      ? '<p class="row muted"><span class="spin"></span>Loading friends...</p>'
+      : f.error
+        ? notice(esc(f.error), 'warn')
+        : `${f.sessionsError ? notice(`Could not read the Minecraft sessions: ${esc(f.sessionsError)}`, 'warn') : ''}${
+            f.sessions.length
+              ? `<div class="fav-grid">${f.sessions
+                  .map(
+                    (s) => `<div class="card fav">${mcEntry({
+                      icon: null,
+                      name: (s.host || s.world || 'Minecraft').replace(/§./g, ''),
+                      motdHtml: s.host ? mcHtml(s.world) : '',
+                      online: true,
+                      players: s.players,
+                      max: s.max,
+                      latency: null,
+                    })}
+                      <div class="row small"><span class="faint">Broadcast by <strong>${esc(s.gamertag)}</strong>${s.version ? ` · ${esc(s.version)}` : ''}</span>${s.closed ? '<span class="tag warn">Closed</span>' : ''}</div></div>`,
+                  )
+                  .join('')}</div>`
+              : '<p class="muted small">Nobody you follow is broadcasting a Minecraft world right now. MCXboxBroadcast accounts show up here while their server runs.</p>'
+          }`;
+    const people = !f?.people
+      ? ''
+      : f.people.length
+        ? `<div class="card table-wrap"><table class="table"><thead><tr><th>Gamertag</th><th>Status</th><th>Friend</th><th></th></tr></thead><tbody>${f.people
+            .map(
+              (p) => `<tr><td><span class="row" style="gap:10px"><span class="avatar">${esc(p.gamertag[0]?.toUpperCase() || '?')}${
+                p.picture ? `<img src="${esc(p.picture)}" alt="" loading="lazy" style="image-rendering:auto" onload="this.parentNode.firstChild.remove()" onerror="this.remove()">` : ''
+              }</span>${esc(p.gamertag)}</span></td>
+              <td>${p.online ? pill('ok', p.presence || 'Online') : `<span class="faint">${esc(p.presence || 'Offline')}</span>`}</td>
+              <td>${p.mutual ? '<span class="tag">Friends</span>' : '<span class="faint small" title="They do not follow you back. MCXboxBroadcast follows back by itself when its friend sync is on.">Not following back</span>'}</td>
+              <td class="num"><button type="button" class="icon-btn danger" data-unfollow="${esc(p.xuid)}" data-name="${esc(p.gamertag)}" title="Unfollow ${esc(p.gamertag)}">${icon('trash')}</button></td></tr>`,
+            )
+            .join('')}</tbody></table></div>`
+        : '<p class="muted small">You do not follow anyone yet. Add your MCXboxBroadcast account’s gamertag above.</p>';
+    box.innerHTML = `${head(pill('ok', st.gamertag || 'Connected'))}
+      <form class="card panel-card row" data-xbox-add style="margin-bottom:16px">
+        <input class="input" name="gamertag" placeholder="Gamertag to follow" maxlength="21" autocomplete="off" spellcheck="false" aria-label="Gamertag" style="flex:1">
+        <button class="btn btn-accent" type="submit">${icon('plus')}Follow</button></form>
+      <h3 style="margin-bottom:10px">Broadcasting now</h3>${sessions}
+      ${f?.people ? `<div class="row" style="margin:20px 0 10px"><h3>People you follow</h3><span class="tag">${f.people.length}</span><span class="faint small">${online} online</span></div>${people}` : ''}`;
+  }
+
+  async function loadFriends() {
+    if (!st?.connected || busy) return;
+    try {
+      friends = await api('GET', '/api/xbox/friends');
+    } catch (err) {
+      friends = { error: err.message };
+      st = await api('GET', '/api/xbox').catch(() => st); // the sign-in may have ended
+    }
+    if (!busy && !box.querySelector('[data-xbox-add] input:focus')) render();
+  }
+
+  async function refresh() {
+    if (busy) return;
+    const was = st?.connected;
+    try {
+      st = await api('GET', '/api/xbox');
+    } catch (err) {
+      box.innerHTML = `<h2>Xbox friends</h2>${notice(esc(err.message), 'warn')}`;
+      return;
+    }
+    render();
+    if (st.connected && !was) loadFriends();
+  }
+
+  box.addEventListener('submit', async (e) => {
+    const form = e.target.closest('[data-xbox-add]');
+    if (!form) return;
+    e.preventDefault();
+    const gamertag = form.elements.gamertag.value.trim();
+    if (!gamertag) return form.elements.gamertag.focus();
+    busy = true;
+    $('button', form).disabled = true;
+    try {
+      friends = await api('POST', '/api/xbox/friends', { gamertag });
+      toast(`Following ${gamertag}`, 'ok');
+    } catch (err) {
+      toast(err.message, 'bad');
+    } finally {
+      busy = false;
+      render();
+    }
+  });
+  box.addEventListener('click', async (e) => {
+    const un = e.target.closest('[data-unfollow]');
+    const b = e.target.closest('[data-xbox]');
+    if (!un && !b) return;
+    const action = b?.dataset.xbox;
+    if (action === 'refresh') return loadFriends();
+    if (un && !(await confirmBox(`Unfollow ${un.dataset.name}?`, 'They are removed from the people this Xbox account follows.', { confirmText: 'Unfollow', danger: true }))) return;
+    if (action === 'disconnect' && st.connected && !(await confirmBox('Disconnect the Microsoft account?', 'The panel forgets this sign-in. Your Xbox friends are not changed.', { confirmText: 'Disconnect' }))) return;
+    busy = true;
+    (un || b).disabled = true;
+    try {
+      if (un) friends = await api('DELETE', `/api/xbox/friends?xuid=${enc(un.dataset.unfollow)}`);
+      else if (action === 'connect') {
+        st = await api('POST', '/api/xbox/connect');
+        if (st.pending) window.open(st.pending.uri, '_blank', 'noopener');
+      } else if (action === 'disconnect') {
+        st = await api('DELETE', '/api/xbox');
+        friends = null;
+      }
+    } catch (err) {
+      toast(err.message, 'bad');
+    } finally {
+      busy = false;
+      render();
+    }
+  });
+
+  refresh();
+  const pollTimer = live(() => st?.pending && refresh(), 3000);
+  const friendsTimer = live(loadFriends, 60000);
+  return () => {
+    unlive(pollTimer);
+    unlive(friendsTimer);
+  };
 }
 
 const isIpAddress = (h) => /^\d{1,3}(\.\d{1,3}){3}$/.test(h) || h.includes(':');
