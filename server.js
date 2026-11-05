@@ -544,8 +544,21 @@ route('POST', '/api/account/sign-out-everywhere', ({ req, res, user }) => auth.s
 
 // playit.gg tunnels (the panel's own computer, so admins only)
 /** Each tunnel's uses: every server port it points at (game, Geyser, a web map...), as the Ports page lists them. */
-const withTunnelUses = (st) => {
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0', ...Object.values(require('os').networkInterfaces()).flat().map((i) => i.address)]);
+/** Ports of this panel's servers that a Velocity or BungeeCord proxy here sends players to: they need no tunnel. */
+async function behindProxy() {
+  const proxies = manager.all().filter((inst) => require('./lib/software').info(inst.cfg).proxy);
+  const lists = await Promise.all(proxies.map((inst) => proxycfg.read(inst).catch(() => null)));
+  const out = new Set();
+  for (const s of lists.flatMap((cfg) => cfg?.servers || [])) {
+    const m = /^\[?([^\]]*?)\]?:(\d+)$/.exec(String(s.address).trim());
+    if (m && (LOCAL_HOSTS.has(m[1].toLowerCase()) || m[1].startsWith('127.'))) out.add(Number(m[2]));
+  }
+  return out;
+}
+const withTunnelUses = async (st) => {
   const uses = manager.all().flatMap((inst) => ports.forServer(inst));
+  const backends = await behindProxy();
   for (const t of st.tunnels || []) {
     const port = Number(/:(\d+)\s*$/.exec(t.destination || '')?.[1]);
     t.uses = uses.filter((u) => u.port === port).map((u) => ({ serverId: u.serverId, server: u.server, what: u.what }));
@@ -558,7 +571,8 @@ const withTunnelUses = (st) => {
   st.missing =
     st.state === 'running'
       ? uses
-          .filter((u) => (u.key === 'game' || u.probe === 'bedrock') && !taken.has(u.port))
+          // A backend's game port is reached through its proxy; its Geyser port still needs its own tunnel.
+          .filter((u) => (u.key === 'game' ? !backends.has(u.port) : u.probe === 'bedrock') && !taken.has(u.port))
           .filter((u, i, all) => all.findIndex((o) => o.port === u.port) === i)
           .map((u) => ({ serverId: u.serverId, server: u.server, what: u.what, port: u.port, kind: u.key === 'game' ? 'java' : 'bedrock' }))
       : [];
