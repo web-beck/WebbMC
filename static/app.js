@@ -384,11 +384,21 @@ async function power(id, action) {
 }
 
 document.addEventListener('click', async (e) => {
-  if (e.target.closest('[data-logout]')) {
+  const out = e.target.closest('[data-logout]');
+  if (out) {
     try {
-      await api('POST', '/auth/logout');
+      // Signs out of this account only; the next account signed in on this browser takes over, if there is one.
+      await api('POST', out.dataset.logout === 'all' ? '/auth/logout?all=1' : '/auth/logout');
     } finally {
       location.href = '/';
+    }
+    return;
+  }
+  if (e.target.closest('[data-add-account]')) {
+    try {
+      await api('POST', '/auth/add-account');
+    } finally {
+      location.href = '/auth/login';
     }
     return;
   }
@@ -500,12 +510,25 @@ function renderChrome() {
   $('#pending-badge').textContent = u.pending || '';
   $('#pending-badge').classList.toggle('hidden', !u.pending);
   $('#nav-toggle').classList.toggle('pending', Boolean(u.pending)); // a dot on the folded menu
+  const others = u.others || [];
+  const switchOpen = $('#side-foot .acct-switch')?.open; // the footer is redrawn on every poll
   $('#side-foot').innerHTML = `
     <div class="me-row">
       <a class="me-link" href="#/account" title="Your account">${mePic(u)}
         <span class="me-who"><strong>${esc(u.name || u.id)}</strong><span>${u.admin ? 'Admin' : esc(u.username || u.email || '')}</span></span></a>
-      <button class="icon-btn" data-logout title="Sign out" aria-label="Sign out">${icon('logout')}</button>
+      <button class="icon-btn" data-logout title="${others.length ? `Sign out of ${esc(u.name || u.id)}` : 'Sign out'}" aria-label="Sign out">${icon('logout')}</button>
     </div>
+    <details class="acct-switch" ${switchOpen ? 'open' : ''}>
+      <summary class="faint small">${others.length ? `Switch account (${others.length + 1} signed in)` : 'Switch account'}</summary>
+      ${others
+        .map(
+          (a) => `<form method="post" action="/auth/switch"><input type="hidden" name="id" value="${esc(a.id)}">
+            <button type="submit" class="me-link acct-btn" title="Switch to ${esc(a.name)}">${mePic(a)}<span class="me-who"><strong>${esc(a.name)}</strong><span>${esc(a.sub)}</span></span></button></form>`,
+        )
+        .join('')}
+      <button type="button" class="btn btn-sm btn-ghost" data-add-account>${icon('plus')}Add another account</button>
+      ${others.length ? `<button type="button" class="btn btn-sm btn-ghost" data-logout="all">${icon('logout')}Sign out of all accounts</button>` : ''}
+    </details>
     <div class="row"><span>Host CPU</span><span class="mono">${host.cpu.toFixed(0)}%</span></div>
     <div class="bar"><i style="width:${host.cpu}%"></i></div>
     <div class="row"><span>Host RAM</span><span class="mono">${fmtBytes(host.memUsed)} / ${fmtBytes(host.memTotal)}</span></div>
@@ -6319,16 +6342,34 @@ function renderPlayit(card) {
         ${existing ? '' : `<div class="row"><button class="btn btn-accent btn-sm" data-playit="unlink">Link again</button><button class="btn btn-sm" data-playit="update">Update agent</button>${off}</div>`}`;
     }
     const dash = st.loginLink || PLAYIT_HOME;
+    const cf = st.cloudflare || { configured: false, domains: [] };
+    const domainCell = (t) => {
+      const links = cf.domains.filter((d) => d.destination === t.destination);
+      const rows = links.map(
+        (d) => `<div class="row" style="gap:6px"><span class="addr">${esc(d.host)}<button type="button" data-copy="${esc(d.host)}" title="Copy">${icon('copy')}</button></span>${
+          d.address !== t.address
+            ? `<span class="tag warn" title="The records still point at ${esc(d.address)}">Tunnel address changed</span><button class="btn btn-sm btn-accent" data-dns="add" data-dest="${esc(t.destination)}" data-host="${esc(d.host)}">Update DNS</button>`
+            : ''
+        }<button class="btn btn-sm btn-ghost" data-dns="remove" data-host="${esc(d.host)}" title="Delete its DNS records">Remove</button></div>`,
+      );
+      if (t.address && !t.disabled) {
+        const show = `<button class="btn btn-sm btn-ghost" data-dns="records" data-dest="${esc(t.destination)}" data-host="${esc(links[0]?.host || '')}" title="The DNS records to add yourself, at any DNS provider">Show records</button>`;
+        if (links.length) rows.push(show);
+        else if (cf.configured) rows.push(`<div class="row" style="gap:6px"><button class="btn btn-sm" data-dns="add" data-dest="${esc(t.destination)}">${icon('link')}Use my domain</button>${show}</div>`);
+        else rows.push(`<div class="row" style="gap:6px">${show}<a class="small" href="#/settings/env" title="A Cloudflare API token with Zone > DNS > Edit">or add CLOUDFLARE_API_TOKEN to have WebbMC add them</a></div>`);
+      }
+      return rows.join('') || '<span class="faint small">-</span>';
+    };
     const tunnels = st.tunnels.length
-      ? `<div class="table-wrap"><table class="table"><thead><tr><th>Address for players</th><th>Goes to</th><th>Server</th></tr></thead><tbody>${st.tunnels
+      ? `<div class="table-wrap"><table class="table"><thead><tr><th>Address for players</th><th>Goes to</th><th>Server</th><th>Your domain</th></tr></thead><tbody>${st.tunnels
           .map((t) => {
             const uses = (t.uses || []).map((u) => `<div><a href="#/server/${esc(u.serverId)}">${esc(u.server)}</a> <span class="faint small">${esc(u.what)}</span></div>`).join('');
             return `<tr><td>${t.address ? `<span class="addr">${esc(t.address)}<button type="button" data-copy="${esc(t.address)}" title="Copy">${icon('copy')}</button></span>` : '<span class="faint">Setting up...</span>'}${
               t.disabled ? ` <span class="tag warn" title="${esc(t.reason || '')}">Disabled</span>` : ''
-            }</td><td class="mono small">${esc(t.destination)}</td><td>${uses || '<span class="faint small">No server on that port</span>'}</td></tr>`;
+            }</td><td class="mono small">${esc(t.destination)}</td><td>${uses || '<span class="faint small">No server on that port</span>'}</td><td>${domainCell(t)}</td></tr>`;
           })
           .join('')}</tbody></table></div>
-         <p class="hint">Servers show their tunnel address on the dashboard automatically (unless they have their own address in Settings).</p>`
+         <p class="hint">Servers show their tunnel address on the dashboard automatically (unless they have their own address in Settings). With <strong>Use my domain</strong>, WebbMC adds the DNS records on Cloudflare after you confirm, and the dashboard shows your domain instead.</p>`
       : `<p class="sub"><strong>No tunnels yet.</strong> Open playit.gg, add a tunnel of type <em>Minecraft Java</em> (or <em>Minecraft Bedrock</em>), and point it at <span class="mono">127.0.0.1</span> and your server's port${
           state.overview.servers.length ? `: ${state.overview.servers.map((s) => `${esc(s.name)} uses <span class="mono">${s.port}</span>`).join(', ')}` : ''
         }. It shows up here within a few seconds.</p>`;
@@ -6355,6 +6396,73 @@ function renderPlayit(card) {
     card.innerHTML = html;
     if (logOpen && card.querySelector('details')) card.querySelector('details').open = true;
   }
+  /** Your own domain for a tunnel: ask for the hostname, show the exact Cloudflare changes, apply only on confirm. */
+  async function useDomain(destination, host = '') {
+    const p = await modal({
+      title: 'Use your own domain',
+      confirmText: 'Preview changes',
+      body: `<div class="field"><label>Hostname for players</label><input class="input mono" name="host" value="${esc(host)}" placeholder="survival.example.com" autofocus autocomplete="off">
+        <span class="hint">On a domain your Cloudflare token can edit. Nothing changes until you confirm on the next step.</span></div>`,
+      onConfirm: (f) => api('POST', '/api/playit/dns/preview', { host: f.elements.host.value, destination }),
+    });
+    if (!p) return;
+    const verb = { create: 'Add', update: 'Change', delete: 'Delete', keep: 'Already right' };
+    const done = await modal({
+      title: `Point ${p.host} at this tunnel?`,
+      wide: true,
+      confirmText: 'Apply on Cloudflare',
+      body: `<p class="sub">WebbMC makes these changes in the DNS of <strong>${esc(p.zone)}</strong>:</p>
+        <ul class="stack-sm" style="list-style:none;padding:0">${p.steps
+          .map((s) => `<li><span class="tag ${s.action === 'delete' || s.action === 'update' ? 'warn' : ''}">${verb[s.action]}</span> <span class="mono small">${esc(s.text)}</span></li>`)
+          .join('')}</ul>
+        <p class="hint">The records are DNS only (grey cloud): Cloudflare's proxy cannot carry Minecraft. Java players join with <span class="mono">${esc(p.host)}</span>.
+          If this is a Bedrock tunnel, players also type port <span class="mono">${p.port}</span> (Bedrock ignores SRV records).</p>`,
+      onConfirm: () => api('POST', '/api/playit/dns', { host: p.host, destination, sig: p.sig }),
+    });
+    if (done) toast(`${p.host} points at the tunnel. DNS can take a few minutes to reach everyone.`, 'ok');
+  }
+  /** The records to add by hand, for any DNS provider. */
+  async function showRecords(destination, host = '') {
+    const r = await modal({
+      title: 'DNS records for this tunnel',
+      confirmText: 'Show records',
+      body: `<div class="field"><label>Hostname for players</label><input class="input mono" name="host" value="${esc(host)}" placeholder="survival.example.com" autofocus autocomplete="off"></div>`,
+      onConfirm: (f) => api('POST', '/api/playit/dns/records', { host: f.elements.host.value, destination }),
+    });
+    if (!r) return;
+    const copyable = (v) => `<span class="addr">${esc(v)}<button type="button" data-copy="${esc(v)}" title="Copy">${icon('copy')}</button></span>`;
+    await modal({
+      title: `Records for ${r.host}`,
+      wide: true,
+      cancelText: '',
+      confirmText: 'Done',
+      body: `<p class="sub">Add these at your DNS provider. Some providers want the name without your domain on the end (<span class="mono">survival</span> instead of <span class="mono">survival.example.com</span>).</p>
+        ${r.records
+          .map(
+            (rec) => `<div class="card stack-sm" style="padding:12px"><div class="row"><span class="tag">${esc(rec.type)}</span>${copyable(rec.name)}</div>
+              <dl class="kv">${rec.fields.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${copyable(v)}</dd>`).join('')}</dl></div>`,
+          )
+          .join('')}
+        <p class="hint">Java players join with <span class="mono">${esc(r.host)}</span>. If this is a Bedrock tunnel, players also type port <span class="mono">${r.port}</span> (Bedrock ignores SRV records).
+          If playit gives the tunnel a new address, these records need changing too.</p>`,
+    });
+  }
+  card.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-dns]');
+    if (!b) return;
+    try {
+      if (b.dataset.dns === 'records') return await showRecords(b.dataset.dest, b.dataset.host);
+      if (b.dataset.dns === 'add') await useDomain(b.dataset.dest, b.dataset.host);
+      else if (await confirmBox(`Remove ${b.dataset.host}?`, 'WebbMC deletes the DNS records it made for this name on Cloudflare. Players can still join with the playit address.', { confirmText: 'Remove', danger: true })) {
+        await api('DELETE', `/api/playit/dns?host=${enc(b.dataset.host)}`);
+        toast(`Removed ${b.dataset.host}`, 'ok');
+      }
+    } catch (err) {
+      toast(err.message, 'bad');
+    }
+    last = '';
+    refresh();
+  });
   card.onclick = async (e) => {
     const b = e.target.closest('[data-playit]');
     if (!b) return;

@@ -235,6 +235,7 @@ Settings come from environment variables. On your own computer, put them in a fi
 | `CURSEFORGE_API_KEY` | (none) | Optional. Lets modpack uploads download the mods a CurseForge export lists (free at console.curseforge.com). Server packs do not need it |
 | `WEBMC_NO_SUPERVISOR` | (unset) | `1` runs the panel without its restart helper (updates then stop the panel instead of restarting it). Not needed under pm2 |
 | `WEBMC_WEBHOOK_SECRET` | (none) | Turns on the GitHub push webhook at `/api/update/webhook` for instant update notices |
+| `CLOUDFLARE_API_TOKEN` | (none) | Optional. Lets **Panel settings → playit.gg → Use my domain** point a hostname on your Cloudflare domain at a tunnel. WebbMC shows the CNAME and SRV records it would add, change or delete, and only writes them once you confirm. Make it at dash.cloudflare.com → My Profile → API Tokens → *Edit zone DNS*, for that one domain |
 | `WEBMC_PLAYIT_SOCKET` | (the usual place) | Where a playit you installed yourself listens, if you start it with its own `--socket-path` |
 | `XBOX_CLIENT_ID` | (none) | Optional. Turns on **Xbox friends** on the Server status page. Register an app at [entra.microsoft.com](https://entra.microsoft.com/) → App registrations, for *Personal Microsoft accounts only*, and turn on *Authentication → Allow public client flows* (no secret or redirect URI). Use its Application (client) ID |
 | `WEBMC_JAVA_PATHS` | (none) | Comma-separated Java executables to offer in each server's Java field |

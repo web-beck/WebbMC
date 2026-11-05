@@ -36,6 +36,7 @@ const motd = require('./lib/motd');
 const pluginconfig = require('./lib/pluginconfig');
 const proxycfg = require('./lib/proxycfg');
 const playit = require('./lib/playit');
+const cloudflare = require('./lib/cloudflare');
 const java = require('./lib/java');
 const ports = require('./lib/ports');
 const updates = require('./lib/updates');
@@ -146,7 +147,7 @@ route(
 );
 
 // Panel overview, polled by the UI every few seconds.
-route('GET', '/api/overview', ({ user }) => {
+route('GET', '/api/overview', ({ req, user }) => {
   const servers = visibleServers(user);
   if (user.admin) updates.watched(); // look for panel updates often while an admin has the panel open
   return {
@@ -156,6 +157,7 @@ route('GET', '/api/overview', ({ user }) => {
     me: {
       ...user,
       googleAvailable: auth.GOOGLE,
+      others: auth.otherAccounts(req, user.id), // for the account switcher
       pending: user.admin ? auth.pendingCount() : 0,
       notifications: notifications.list(user, new Set(servers.map((s) => s.id))).unread,
     },
@@ -544,10 +546,30 @@ const withTunnelUses = (st) => {
     const port = Number(/:(\d+)\s*$/.exec(t.destination || '')?.[1]);
     t.uses = uses.filter((u) => u.port === port).map((u) => ({ serverId: u.serverId, server: u.server, what: u.what }));
   }
+  st.cloudflare = cloudflare.status();
   return st;
 };
 route('GET', '/api/playit', async () => withTunnelUses(await playit.status()), { admin: true });
 route('POST', '/api/playit', async ({ body }) => withTunnelUses(await playit.act(String(body.action || ''))), { admin: true });
+// Your own domain for a tunnel, with Cloudflare DNS: preview the record changes, then apply them once confirmed.
+// The tunnel is looked up here by where it goes, so the address the records point at always comes from playit.
+const tunnelTo = (destination) => {
+  const t = playit.status().tunnels.find((x) => x.destination === destination && x.address && !x.disabled);
+  if (!t) throw httpError(404, 'That tunnel is gone or has no address yet');
+  return t;
+};
+route('POST', '/api/playit/dns/records', ({ body }) => cloudflare.records(body.host, tunnelTo(String(body.destination || '')).address), { admin: true });
+route('POST', '/api/playit/dns/preview', ({ body }) => cloudflare.preview(body.host, tunnelTo(String(body.destination || '')).address), { admin: true });
+route(
+  'POST',
+  '/api/playit/dns',
+  ({ body, user }) => {
+    const destination = String(body.destination || '');
+    return cloudflare.apply(body.host, tunnelTo(destination).address, destination, String(body.sig || ''), user);
+  },
+  { admin: true },
+);
+route('DELETE', '/api/playit/dns', ({ query, user }) => cloudflare.remove(query.get('host'), user), { admin: true });
 
 // Everyone's accounts: the admin approves, blocks, removes, makes admins and gives out one-time passwords
 route('GET', '/api/users', () => auth.listUsers(), { admin: true });
