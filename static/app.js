@@ -1992,9 +1992,56 @@ function PlayersTab(el, ctx) {
           </div>`,
         ).join('')}
       </div>
+    </section>
+    <section class="section" id="pl-history">
+      <div class="row" style="margin-bottom:14px"><h2>All players</h2><span class="tag" id="pl-hcount">0</span><span class="spacer"></span>
+        <input class="input input-sm" id="pl-search" type="search" placeholder="Search players" autocomplete="off" style="max-width:220px"></div>
+      <div id="pl-hlist"><div class="card panel-card muted">Loading...</div></div>
     </section>`;
 
   let data = null;
+  let history = null;
+  let historySig = '';
+  let historyAt = 0;
+  /** Everyone who ever joined, from the world's player files. Asked again when someone joins or leaves, else each minute. */
+  async function loadHistory() {
+    historyAt = Date.now();
+    try {
+      history = await api('GET', `/api/servers/${ctx.id}/players/history`);
+    } catch (err) {
+      history = [];
+      toast(err.message, 'bad');
+    }
+    renderHistory();
+  }
+  function renderHistory() {
+    if (!history) return;
+    $('#pl-history', el).classList.toggle('hidden', Boolean(ctx.srv.proxy));
+    const q = $('#pl-search', el).value.trim().toLowerCase();
+    const rows = history.filter((p) => !q || (p.name || p.uuid).toLowerCase().includes(q));
+    $('#pl-hcount', el).textContent = history.length;
+    $('#pl-hlist', el).innerHTML = !history.length
+      ? '<div class="card panel-card muted">Nobody has joined this server yet.</div>'
+      : !rows.length
+        ? '<div class="card panel-card muted">No player matches that search.</div>'
+        : `<div class="table-wrap card"><table class="table"><thead><tr><th>Player</th><th>Last seen</th><th>Last location</th><th>First joined</th></tr></thead><tbody>${rows
+            .map((p) => {
+              const name = p.name || p.uuid;
+              const coords = p.pos ? p.pos.join(' ') : '';
+              return `<tr><td><span class="row" style="gap:8px;flex-wrap:nowrap">${p.name ? avatar(p.name) : ''}<span>${esc(name)}</span>${p.online ? '<span class="pill ok"><span class="dot ok"></span>Online</span>' : ''}</span></td>
+                <td title="${esc(fmtDate(p.lastSeen))}">${p.online ? 'Now' : esc(fmtAgo(p.lastSeen))}</td>
+                <td>${
+                  p.pos
+                    ? `<span class="faint small">${esc(p.dimension || '')}</span> <span class="addr mono small">${esc(p.pos.join(', '))}<button type="button" data-copy="${esc(coords)}" title="Copy for /tp">${icon('copy')}</button></span>${
+                        p.online ? ' <span class="faint small" title="Player files are saved on autosave and when the player leaves">(last save)</span>' : ''
+                      }`
+                    : '<span class="faint small">Unknown</span>'
+                }</td>
+                <td>${p.firstPlayed ? `<span title="${esc(fmtDate(p.firstPlayed))}">${esc(fmtAgo(p.firstPlayed))}</span>` : '<span class="faint small" title="Only Paper and Spigot servers record this">-</span>'}</td></tr>`;
+            })
+            .join('')}</tbody></table></div>`;
+  }
+  $('#pl-search', el).addEventListener('input', renderHistory);
   const live = () => Boolean(ctx.srv.pid);
   const run = async (command, msg) => {
     try {
@@ -2099,6 +2146,11 @@ function PlayersTab(el, ctx) {
     try {
       data = await api('GET', `/api/servers/${ctx.id}/players`);
       render();
+      const sig = data.online.join('\n');
+      if (sig !== historySig || Date.now() - historyAt > 60000) {
+        historySig = sig;
+        loadHistory();
+      }
     } catch (err) {
       toast(err.message, 'bad');
     }

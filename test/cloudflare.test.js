@@ -43,7 +43,7 @@ test('Squarespace gets short names (the doubled-name mistake)', () => {
   const [[type, a], [, srv]] = fields('mc.inclusionarcade.ca', 'squarespace', { target: '69.9.180.16', port: 57464 });
   assert.strictEqual(type, 'A');
   assert.deepStrictEqual(a, { Name: 'mc', Data: '69.9.180.16' });
-  assert.deepStrictEqual(srv, { Name: '_minecraft._tcp.mc', Priority: '0', Weight: '5', Port: '57464', Target: 'mc.inclusionarcade.ca' });
+  assert.deepStrictEqual(srv, { Name: '_minecraft._tcp.mc', Priority: '0', Data: '5 57464 mc.inclusionarcade.ca' });
 });
 
 test('GoDaddy splits Service, Protocol and Name', () => {

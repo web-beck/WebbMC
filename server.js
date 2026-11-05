@@ -37,6 +37,7 @@ const pluginconfig = require('./lib/pluginconfig');
 const proxycfg = require('./lib/proxycfg');
 const playit = require('./lib/playit');
 const cloudflare = require('./lib/cloudflare');
+const playerdata = require('./lib/playerdata');
 const java = require('./lib/java');
 const ports = require('./lib/ports');
 const updates = require('./lib/updates');
@@ -283,6 +284,9 @@ route('GET', '/api/servers/:id/players', ({ inst }) => {
     bannedIps: read('banned-ips.json'),
   };
 });
+
+// Everyone who ever joined, with when they were last seen and where (from the world's player files).
+route('GET', '/api/servers/:id/players/history', ({ inst }) => playerdata.list(inst, [...inst.players.keys()]));
 
 route('GET', '/api/servers/:id/properties', ({ inst }) => {
   const text = readProps(inst);
