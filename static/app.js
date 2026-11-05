@@ -6284,6 +6284,7 @@ function renderPlayit(card) {
   let last = '';
   let acting = false;
   let cfConfigured = false; // CLOUDFLARE_API_TOKEN is set: WebbMC can add DNS records itself
+  let cfProviders = []; // DNS providers the records can be laid out for
   /** What the panel found about a playit installed on this computer (when it is not using it). */
   function externalNote(ext) {
     if (!ext || ext.inUse || ext.state === 'none') return '';
@@ -6345,6 +6346,7 @@ function renderPlayit(card) {
     const dash = st.loginLink || PLAYIT_HOME;
     const cf = st.cloudflare || { configured: false, domains: [] };
     cfConfigured = cf.configured;
+    cfProviders = cf.providers || [];
     const domainCell = (t) => {
       const links = cf.domains.filter((d) => d.destination === t.destination);
       const rows = links.map(
@@ -6355,11 +6357,11 @@ function renderPlayit(card) {
         }<button class="btn btn-sm btn-ghost" data-dns="remove" data-host="${esc(d.host)}" title="Delete its DNS records">Remove</button></div>`,
       );
       if (t.address && !t.disabled) {
-        const show = `<button class="btn btn-sm btn-ghost" data-dns="records" data-dest="${esc(t.destination)}" data-host="${esc(links[0]?.host || '')}" title="The DNS records to add yourself, at any DNS provider">Show records</button>`;
-        if (links.length) rows.push(show);
-        else if (cf.configured) rows.push(`<div class="row" style="gap:6px"><button class="btn btn-sm" data-dns="add" data-dest="${esc(t.destination)}">${icon('link')}Use my domain</button>${show}</div>`);
-        // No token: the same button shows the records to add by hand, at any DNS provider.
-        else rows.push(`<button class="btn btn-sm" data-dns="records" data-dest="${esc(t.destination)}" title="Shows the DNS records to add at your DNS provider">${icon('link')}Use my domain</button>`);
+        rows.push(
+          links.length
+            ? `<button class="btn btn-sm btn-ghost" data-dns="add" data-dest="${esc(t.destination)}" data-host="${esc(links[0].host)}" title="The DNS records for another provider">Records</button>`
+            : `<button class="btn btn-sm" data-dns="add" data-dest="${esc(t.destination)}" title="Pick your DNS provider and get the records to add">${icon('link')}Use my domain</button>`,
+        );
       }
       return rows.join('') || '<span class="faint small">-</span>';
     };
@@ -6372,7 +6374,7 @@ function renderPlayit(card) {
             }</td><td class="mono small">${esc(t.destination)}</td><td>${uses || '<span class="faint small">No server on that port</span>'}</td><td>${domainCell(t)}</td></tr>`;
           })
           .join('')}</tbody></table></div>
-         <p class="hint">Servers show their tunnel address on the dashboard automatically (unless they have their own address in Settings). With <strong>Use my domain</strong>, WebbMC adds the DNS records on Cloudflare after you confirm, and the dashboard shows your domain instead.</p>`
+         <p class="hint">Servers show their tunnel address on the dashboard automatically (unless they have their own address in Settings). With <strong>Use my domain</strong>, pick your DNS provider and WebbMC shows the records to add there (on Cloudflare with a token, it adds them after you confirm and the dashboard shows your domain).</p>`
       : `<p class="sub"><strong>No tunnels yet.</strong> Open playit.gg, add a tunnel of type <em>Minecraft Java</em> (or <em>Minecraft Bedrock</em>), and point it at <span class="mono">127.0.0.1</span> and your server's port${
           state.overview.servers.length ? `: ${state.overview.servers.map((s) => `${esc(s.name)} uses <span class="mono">${s.port}</span>`).join(', ')}` : ''
         }. It shows up here within a few seconds.</p>`;
@@ -6399,16 +6401,46 @@ function renderPlayit(card) {
     card.innerHTML = html;
     if (logOpen && card.querySelector('details')) card.querySelector('details').open = true;
   }
-  /** Your own domain for a tunnel: ask for the hostname, show the exact Cloudflare changes, apply only on confirm. */
+  /**
+   * Your own domain for a tunnel: the hostname and the DNS provider. Cloudflare with a token gets the exact changes
+   * to confirm (WebbMC applies them); any other provider gets the records to add, laid out the way its form asks.
+   */
   async function useDomain(destination, host = '') {
-    const p = await modal({
+    let saved = '';
+    try {
+      saved = localStorage.getItem('webmc.dnsProvider') || '';
+    } catch {
+      /* no storage: pick again */
+    }
+    const pick = cfProviders.some((p) => p.id === saved) ? saved : cfConfigured ? 'cloudflare' : '';
+    const auto = (id) => id === 'cloudflare' && cfConfigured;
+    const r = await modal({
       title: 'Use your own domain',
-      confirmText: 'Preview changes',
-      body: `<div class="field"><label>Hostname for players</label><input class="input mono" name="host" value="${esc(host)}" placeholder="survival.example.com" autofocus autocomplete="off">
-        <span class="hint">On a domain your Cloudflare token can edit. Nothing changes until you confirm on the next step.</span></div>`,
-      onConfirm: (f) => api('POST', '/api/playit/dns/preview', { host: f.elements.host.value, destination }),
+      confirmText: 'Continue',
+      body: `<div class="field"><label>Hostname for players</label><input class="input mono" name="host" value="${esc(host)}" placeholder="survival.example.com" autofocus autocomplete="off"></div>
+        <div class="field"><label>Where is your domain's DNS?</label><select class="input" name="provider">
+          <option value="" ${pick ? '' : 'selected'} disabled>Pick your DNS provider</option>
+          ${cfProviders.map((p) => `<option value="${esc(p.id)}" ${p.id === pick ? 'selected' : ''}>${esc(p.label)}${auto(p.id) ? ' (WebbMC adds the records)' : ''}</option>`).join('')}</select>
+          <span class="hint">Usually where you bought the domain, unless you moved its DNS somewhere else. ${
+            cfConfigured ? 'With Cloudflare, WebbMC adds the records for you after you confirm.' : 'WebbMC shows the records to add there, field by field.'
+          }</span></div>`,
+      onConfirm: async (f) => {
+        const provider = f.elements.provider.value;
+        if (!provider) throw new Error('Pick your DNS provider');
+        try {
+          localStorage.setItem('webmc.dnsProvider', provider);
+        } catch {
+          /* not remembered, that is fine */
+        }
+        const body = { host: f.elements.host.value, destination, provider };
+        return auto(provider) ? { preview: await api('POST', '/api/playit/dns/preview', body) } : { records: await api('POST', '/api/playit/dns/records', body) };
+      },
     });
-    if (!p) return;
+    if (r?.preview) await applyOnCloudflare(destination, r.preview);
+    else if (r?.records) await showRecords(r.records);
+  }
+  /** Cloudflare with a token: the exact changes, applied only on confirm. */
+  async function applyOnCloudflare(destination, p) {
     const verb = { create: 'Add', update: 'Change', delete: 'Delete', keep: 'Already right' };
     const done = await modal({
       title: `Point ${p.host} at this tunnel?`,
@@ -6424,38 +6456,31 @@ function renderPlayit(card) {
     });
     if (done) toast(`${p.host} points at the tunnel. DNS can take a few minutes to reach everyone.`, 'ok');
   }
-  /** The records to add by hand, for any DNS provider. */
-  async function showRecords(destination, host = '') {
-    const r = await modal({
-      title: 'DNS records for this tunnel',
-      confirmText: 'Show records',
-      body: `<div class="field"><label>Hostname for players</label><input class="input mono" name="host" value="${esc(host)}" placeholder="survival.example.com" autofocus autocomplete="off"></div>`,
-      onConfirm: (f) => api('POST', '/api/playit/dns/records', { host: f.elements.host.value, destination }),
-    });
-    if (!r) return;
-    const copyable = (v) => `<span class="addr">${esc(v)}<button type="button" data-copy="${esc(v)}" title="Copy">${icon('copy')}</button></span>`;
+  /** The records to add by hand, field by field as the chosen provider's DNS form asks for them. */
+  async function showRecords(r) {
+    const copyable = (v) => (v.startsWith('(') ? `<span class="faint">${esc(v)}</span>` : `<span class="addr">${esc(v)}<button type="button" data-copy="${esc(v)}" title="Copy">${icon('copy')}</button></span>`);
     await modal({
       title: `Records for ${r.host}`,
       wide: true,
       cancelText: '',
       confirmText: 'Done',
-      body: `<p class="sub">Add these at your DNS provider. Some providers want the name without your domain on the end (<span class="mono">survival</span> instead of <span class="mono">survival.example.com</span>).</p>
+      body: `<p class="sub">In <strong>${esc(r.provider)}</strong>, open the DNS settings of <strong>${esc(r.zone)}</strong> and add these two records. Delete any other A, AAAA or CNAME record with the same name first.</p>
         ${r.records
           .map(
-            (rec) => `<div class="card stack-sm" style="padding:12px"><div class="row"><span class="tag">${esc(rec.type)}</span>${copyable(rec.name)}</div>
+            (rec) => `<div class="card stack-sm" style="padding:12px"><div class="row"><span class="tag">Type: ${esc(rec.type)}</span></div>
               <dl class="kv">${rec.fields.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${copyable(v)}</dd>`).join('')}</dl></div>`,
           )
           .join('')}
-        <p class="hint">Java players join with <span class="mono">${esc(r.host)}</span>. If this is a Bedrock tunnel, players also type port <span class="mono">${r.port}</span> (Bedrock ignores SRV records).
+        ${r.notes.map((n) => notice(esc(n), 'warn')).join('')}
+        <p class="hint">Leave TTL on its default. Java players join with <span class="mono">${esc(r.host)}</span>. If this is a Bedrock tunnel, players also type port <span class="mono">${r.port}</span> (Bedrock ignores SRV records).
           If playit gives the tunnel a new address, these records need changing too.</p>
-        ${cfConfigured ? '' : '<p class="hint">On Cloudflare? Add <a href="#/settings/env">CLOUDFLARE_API_TOKEN</a> and WebbMC can add these for you after you confirm.</p>'}`,
+        ${r.provider === 'Cloudflare' && !cfConfigured ? '<p class="hint">Add <a href="#/settings/env">CLOUDFLARE_API_TOKEN</a> and WebbMC can add these for you after you confirm.</p>' : ''}`,
     });
   }
   card.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-dns]');
     if (!b) return;
     try {
-      if (b.dataset.dns === 'records') return await showRecords(b.dataset.dest, b.dataset.host);
       if (b.dataset.dns === 'add') await useDomain(b.dataset.dest, b.dataset.host);
       else if (await confirmBox(`Remove ${b.dataset.host}?`, 'WebbMC deletes the DNS records it made for this name on Cloudflare. Players can still join with the playit address.', { confirmText: 'Remove', danger: true })) {
         await api('DELETE', `/api/playit/dns?host=${enc(b.dataset.host)}`);

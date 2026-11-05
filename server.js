@@ -558,7 +558,7 @@ const tunnelTo = (destination) => {
   if (!t) throw httpError(404, 'That tunnel is gone or has no address yet');
   return t;
 };
-route('POST', '/api/playit/dns/records', ({ body }) => cloudflare.records(body.host, tunnelTo(String(body.destination || '')).address), { admin: true });
+route('POST', '/api/playit/dns/records', ({ body }) => cloudflare.records(body.host, tunnelTo(String(body.destination || '')).address, body.provider), { admin: true });
 route('POST', '/api/playit/dns/preview', ({ body }) => cloudflare.preview(body.host, tunnelTo(String(body.destination || '')).address), { admin: true });
 route(
   'POST',
