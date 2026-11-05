@@ -137,11 +137,14 @@ route(
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write(': connected\n\n');
     const onChange = () => res.write('event: change\ndata: {}\n\n');
+    const onStats = () => res.write('event: stats\ndata: {}\n\n');
     store.changes.on('change', onChange);
+    store.changes.on('stats', onStats);
     const keepAlive = setInterval(() => res.write(': ping\n\n'), 20000);
     req.on('close', () => {
       clearInterval(keepAlive);
       store.changes.off('change', onChange);
+      store.changes.off('stats', onStats);
     });
   },
   { stream: true },

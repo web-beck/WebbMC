@@ -1948,7 +1948,7 @@ function MetricsTab(el, ctx) {
   }
   load();
   details();
-  const timer = live(load, 3000);
+  const timer = live(load, 3000, true);
   const onResize = () => draw();
   window.addEventListener('resize', onResize);
   return {
@@ -7106,11 +7106,14 @@ function offerReload() {
 // The panel says when its data changed (GET /api/events: an account approved, a server added, a share, a setting...),
 // and the open page fetches again at once instead of waiting for its next timer. Pages register their refresh with
 // live() in place of setInterval; the timer stays as a fallback.
+// The panel also says each time it has measured CPU, memory and players ('stats'); pages that chart them pass
+// onStats to fetch again then.
 const liveFns = new Map();
 let liveSeq = 0;
-function live(fn, ms) {
+let liveOpen = false;
+function live(fn, ms, onStats = false) {
   const id = ++liveSeq;
-  liveFns.set(id, { fn, timer: setInterval(fn, ms) });
+  liveFns.set(id, { fn, onStats, timer: setInterval(() => !(onStats && liveOpen) && fn(), ms) });
   return id;
 }
 function unlive(id) {
@@ -7139,8 +7142,17 @@ function listenForChanges() {
   const es = new EventSource('/api/events');
   let dropped = false;
   es.addEventListener('change', liveRefresh);
-  es.onerror = () => (dropped = true); // the browser reconnects by itself
+  es.addEventListener('stats', () => {
+    if (document.hidden) return;
+    poll();
+    for (const { fn, onStats } of [...liveFns.values()]) if (onStats) Promise.resolve().then(fn).catch(() => {});
+  });
+  es.onerror = () => {
+    dropped = true; // the browser reconnects by itself; the timers carry on meanwhile
+    liveOpen = false;
+  };
   es.onopen = () => {
+    liveOpen = true;
     if (dropped) liveRefresh(); // changes made while the connection was down
     dropped = false;
   };
@@ -7181,6 +7193,6 @@ async function poll() {
   } else route();
   window.addEventListener('hashchange', route);
   document.addEventListener('visibilitychange', () => !document.hidden && liveRefresh());
-  setInterval(poll, 2500);
+  setInterval(() => !liveOpen && poll(), 2500); // only while the live connection is down: it pushes otherwise
   listenForChanges();
 })();
