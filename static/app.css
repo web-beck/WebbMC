@@ -489,6 +489,30 @@ table.table { width: 100%; border-collapse: collapse; }
 .feed .item.error .msg { color: var(--danger); }
 @media (max-width: 720px) { .feed .item { grid-template-columns: 1fr; gap: 2px; } }
 
+/* activity: performance, like Task Manager (a list with small graphs, the picked one large) */
+.perf { display: grid; grid-template-columns: 270px minmax(0, 1fr); padding: 0; overflow: hidden; }
+.perf-list { display: grid; align-content: start; gap: 4px; padding: 8px; border-right: 1px solid var(--line); max-height: 640px; overflow-y: auto; }
+.perf-item { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 12px; align-items: center; padding: 10px; border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.perf-item:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+.perf-item.active { background: var(--surface-2); }
+.perf-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.perf-item canvas { width: 68px; height: 42px; display: block; border-radius: 6px; background: color-mix(in srgb, var(--line) 50%, transparent); }
+.perf-txt { display: grid; gap: 2px; min-width: 0; }
+.perf-txt > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.perf-main { display: grid; gap: 18px; align-content: start; padding: 18px 20px 20px; min-width: 0; }
+.perf-main h3 { margin: 0; }
+.perf-chart { display: grid; gap: 8px; }
+.perf-chart canvas { width: 100%; height: 200px; display: block; }
+.perf-val { font-family: var(--font-heading); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.perf-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px 18px; margin: 0; }
+.perf-stats dt { color: var(--muted); font-size: 12px; }
+.perf-stats dd { margin: 2px 0 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .perf { grid-template-columns: 1fr; }
+  .perf-list { grid-auto-flow: column; grid-auto-columns: minmax(210px, 1fr); border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; }
+  .perf-main { padding: 16px; }
+}
+
 /* ------------------------------------------------------------ accounts */
 .me-row { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; margin-bottom: 4px; border-bottom: 1px solid var(--line); min-width: 0; }
 .me-pic { width: 32px; height: 32px; border-radius: 50%; flex: none; display: grid; place-items: center; background: var(--surface-3); color: var(--secondary-soft); font-weight: 700; object-fit: cover; }

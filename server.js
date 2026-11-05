@@ -498,6 +498,16 @@ route('PUT', '/api/env/text', ({ user, body }) => envSaved(user, envfile.replace
 route('POST', '/api/env/restart', ({ user }) => updates.restartPanel(user, 'to apply .env'), { admin: true });
 route('POST', '/api/restart', ({ user }) => updates.restartPanel(user, 'from Panel settings'), { admin: true });
 
+// The Activity page's graphs: the machine and every server this account can see, ?since=<newest point it has>.
+route('GET', '/api/metrics', ({ user, query }) => {
+  const since = Number(query.get('since')) || 0;
+  const after = (list) => (since ? list.filter((p) => p.t > since) : list);
+  const ids = visibleIds(user);
+  return {
+    host: after(manager.hostHistory()),
+    servers: Object.fromEntries(manager.all().filter((i) => ids.has(i.id)).map((i) => [i.id, after(i.history)])),
+  };
+});
 route('GET', '/api/activity', ({ user }) => {
   if (user.admin) return store.state.activity;
   const ids = visibleIds(user);

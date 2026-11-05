@@ -2046,7 +2046,7 @@ function PlayersTab(el, ctx) {
             .join('')}</tbody></table></div>`;
   }
   $('#pl-search', el).addEventListener('input', renderHistory);
-  const live = () => Boolean(ctx.srv.pid);
+  const running = () => Boolean(ctx.srv.pid); // not "live": that is the refresh helper this tab needs below
   const run = async (command, msg) => {
     try {
       await api('POST', `/api/servers/${ctx.id}/command`, { command });
@@ -2059,7 +2059,7 @@ function PlayersTab(el, ctx) {
 
   function render() {
     if (!data) return;
-    const isLive = live();
+    const isLive = running();
     const proxy = ctx.srv.proxy;
     $('#pl-lists', el).classList.toggle('hidden', proxy);
     $('#pl-notice', el).innerHTML = !isLive
@@ -5182,10 +5182,188 @@ const TAB_VIEWS = {
 
 // ================================================================ activity
 
+/** A small graph without axes or labels, for the Performance list. values: oldest first. */
+function drawSpark(canvas, values, color, max) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (!w || !h) return;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  const g = canvas.getContext('2d');
+  g.scale(dpr, dpr);
+  if (values.length < 2) return;
+  const x = (i) => (w * i) / (values.length - 1);
+  const y = (v) => h - 2 - (h - 4) * Math.min(v / (max || 1), 1);
+  g.beginPath();
+  values.forEach((v, i) => (i ? g.lineTo(x(i), y(v)) : g.moveTo(x(i), y(v))));
+  g.strokeStyle = color;
+  g.lineWidth = 1.5;
+  g.lineJoin = 'round';
+  g.stroke();
+  g.lineTo(w, h);
+  g.lineTo(0, h);
+  g.closePath();
+  g.fillStyle = hexA(color, 0.18);
+  g.fill();
+}
+
 function Activity(root) {
   root.innerHTML = `
-    <div class="page-head"><div><div class="eyebrow">Log</div><h1>Activity</h1><p>Everything the panel and your servers have done recently.</p></div></div>
-    <div class="card feed" id="act"></div>`;
+    <div class="page-head"><div><div class="eyebrow">Log</div><h1>Activity</h1><p>How this machine and your servers are doing, and everything they have done recently.</p></div></div>
+    <section class="section">
+      <h2>Performance</h2>
+      <div class="card perf"><div class="perf-list" id="perf-list" role="listbox" aria-label="What to show"></div><div class="perf-main" id="perf-main"></div></div>
+    </section>
+    <section class="section">
+      <h2>Log</h2>
+      <div class="card feed" id="act"></div>
+    </section>`;
+
+  // ------------------------------------------------ performance: the machine and each server, like Task Manager
+  const CPU = '#c12aab';
+  const MEM = '#39ff14';
+  const memAxis = (v) => (v >= 1073741824 ? `${(v / 1073741824).toFixed(1)} GB` : `${Math.round(v / 1048576)} MB`);
+  const pctAxis = (v) => `${v.toFixed(0)}%`;
+  const cpuMax = (values) => Math.min(100, Math.max(20, Math.ceil(Math.max(0, ...values) / 20) * 20)); // room above the peak
+  let host = []; // { t, cpu, mem }, ten minutes
+  const servers = new Map(); // server id -> [{ t, cpu, mem, players }]
+  let newest = 0;
+  let pick = pref.get('perf', 'cpu'); // 'cpu', 'mem' or a server id
+
+  /** What the list shows, and the graphs and figures for the one picked. */
+  function items() {
+    const o = state.overview;
+    const h = o.host;
+    const list = [
+      {
+        id: 'cpu',
+        name: 'CPU',
+        sub: `${h.cpu.toFixed(0)}%`,
+        spark: { values: host.map((p) => p.cpu), color: CPU, max: 100 },
+        charts: [{ key: 'cpu', label: 'Utilization, all cores', value: `${h.cpu.toFixed(0)}%`, points: host.map((p) => ({ t: p.t, v: p.cpu })), color: CPU, max: 100, fmt: pctAxis }],
+        stats: [
+          ['Utilization', `${h.cpu.toFixed(0)}%`],
+          ['Cores', h.cores],
+          ['Machine up for', fmtDuration(h.uptime * 1000)],
+          ['Machine', h.hostname || '—'],
+        ],
+      },
+      {
+        id: 'mem',
+        name: 'Memory',
+        sub: `${fmtBytes(h.memUsed)} / ${fmtBytes(h.memTotal)} (${pct(h.memUsed, h.memTotal).toFixed(0)}%)`,
+        spark: { values: host.map((p) => p.mem), color: MEM, max: h.memTotal },
+        charts: [{ key: 'mem', label: h.memLimited ? "In use, of this container's limit" : 'In use', value: fmtBytes(h.memUsed), points: host.map((p) => ({ t: p.t, v: p.mem })), color: MEM, max: h.memTotal, fmt: memAxis }],
+        stats: [
+          ['In use', `${fmtBytes(h.memUsed)} (${pct(h.memUsed, h.memTotal).toFixed(0)}%)`],
+          ['Available', fmtBytes(Math.max(0, h.memTotal - h.memUsed))],
+          [h.memLimited ? 'Container limit' : 'Total', fmtBytes(h.memTotal)],
+          ['Used by running servers', fmtBytes(o.servers.filter((s) => s.pid).reduce((n, s) => n + s.stats.mem, 0))],
+        ],
+      },
+    ];
+    for (const s of o.servers) {
+      const pts = s.pid ? servers.get(s.id) || [] : [];
+      const cpu = pts.map((p) => p.cpu);
+      const memTop = Math.max(s.maxRam * 1048576 * 1.15, ...pts.map((p) => p.mem));
+      list.push({
+        id: s.id,
+        name: s.name,
+        server: s,
+        sub: s.pid ? `${s.stats.cpu.toFixed(1)}% · ${fmtBytes(s.stats.mem)}` : statusInfo(s).label,
+        spark: { values: cpu, color: CPU, max: cpuMax(cpu) },
+        charts: [
+          { key: 'cpu', label: 'CPU, share of all cores', value: s.pid ? `${s.stats.cpu.toFixed(1)}%` : '—', points: pts.map((p) => ({ t: p.t, v: p.cpu })), color: CPU, max: cpuMax(cpu), fmt: pctAxis },
+          { key: 'mem', label: `Memory, of ${fmtMB(s.maxRam)} given`, value: s.pid ? fmtBytes(s.stats.mem) : '—', points: pts.map((p) => ({ t: p.t, v: p.mem })), color: MEM, max: memTop, fmt: memAxis },
+        ],
+        stats: [
+          ['Status', statusInfo(s).label],
+          ['Players', `${s.playerCount} / ${s.maxPlayers || '—'}`],
+          ['Up for', s.startedAt ? fmtDuration(Date.now() - s.startedAt) : '—'],
+          ['Process ID', s.pid || '—'],
+        ],
+      });
+    }
+    return list;
+  }
+
+  let listSig = '';
+  function renderList(list) {
+    const el = $('#perf-list', root);
+    // Built again only when servers come or go, so keyboard focus stays put while the figures change.
+    const sig = list.map((i) => i.id).join(',');
+    if (sig !== listSig) {
+      listSig = sig;
+      el.innerHTML = list
+        .map((i) => `<button type="button" class="perf-item" role="option" data-pick="${esc(i.id)}"><canvas aria-hidden="true"></canvas><span class="perf-txt"><strong></strong><span class="faint small"></span></span></button>`)
+        .join('');
+    }
+    list.forEach((i, n) => {
+      const b = el.children[n];
+      b.classList.toggle('active', i.id === pick);
+      b.setAttribute('aria-selected', String(i.id === pick));
+      $('strong', b).textContent = i.name;
+      $('.faint', b).textContent = i.sub;
+      drawSpark($('canvas', b), i.spark.values.slice(-60), i.spark.color, i.spark.max); // the last minute
+    });
+  }
+
+  let shown = '';
+  function renderMain(cur) {
+    const main = $('#perf-main', root);
+    if (shown !== cur.id) {
+      shown = cur.id;
+      main.innerHTML = `
+        <div class="row"><h3>${esc(cur.name)}</h3><span class="spacer"></span>${cur.server ? `<a class="btn btn-sm btn-ghost" href="#/server/${esc(cur.id)}">Open server</a>` : ''}</div>
+        ${cur.charts
+          .map(
+            (c) =>
+              `<div class="perf-chart"><div class="row"><span class="faint small">${esc(c.label)}</span><span class="spacer"></span><span class="perf-val" data-val="${c.key}"></span></div><canvas data-chart="${c.key}" role="img" aria-label="${esc(c.label)} over the last 10 minutes"></canvas></div>`,
+          )
+          .join('')}
+        <dl class="perf-stats"></dl>`;
+    }
+    for (const c of cur.charts) {
+      $(`[data-val="${c.key}"]`, main).textContent = c.value;
+      drawChart($(`[data-chart="${c.key}"]`, main), c.points, c);
+    }
+    $('.perf-stats', main).innerHTML = cur.stats.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(String(v))}</dd></div>`).join('');
+  }
+
+  function draw() {
+    if (!state.overview) return;
+    const list = items();
+    const cur = list.find((i) => i.id === pick) || list[0];
+    pick = cur.id;
+    renderList(list);
+    renderMain(cur);
+  }
+
+  async function loadMetrics() {
+    try {
+      const r = await api('GET', `/api/metrics${newest ? `?since=${newest}` : ''}`);
+      const all = [r.host, ...Object.values(r.servers)].flat();
+      newest = Math.max(newest, ...all.map((p) => p.t)); // the panel's clock, not this computer's: they may differ
+      const recent = (pts) => pts.filter((p) => p.t > newest - 600000);
+      host = recent([...host, ...r.host]);
+      for (const [id, pts] of Object.entries(r.servers)) servers.set(id, recent([...(servers.get(id) || []), ...pts]));
+      draw();
+    } catch {
+      /* the next push tries again */
+    }
+  }
+
+  $('#perf-list', root).addEventListener('click', (e) => {
+    const b = e.target.closest('[data-pick]');
+    if (!b) return;
+    pick = b.dataset.pick;
+    pref.set('perf', pick);
+    draw();
+  });
+  window.addEventListener('resize', draw);
+
+  // ------------------------------------------------ log
   async function load() {
     try {
       const items = await api('GET', '/api/activity');
@@ -5209,8 +5387,17 @@ function Activity(root) {
     }
   }
   load();
+  loadMetrics();
   const timer = live(load, 5000);
-  return { destroy: () => unlive(timer) };
+  const metricsTimer = live(loadMetrics, 3000, true);
+  return {
+    update: draw,
+    destroy: () => {
+      unlive(timer);
+      unlive(metricsTimer);
+      window.removeEventListener('resize', draw);
+    },
+  };
 }
 
 // ================================================================ server status checker
