@@ -53,3 +53,18 @@ test('finds players in the 26.1 players/data folder and the old playerdata folde
   assert.ok(players.find((p) => p.uuid === a).online);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('finds worlds in a world container and lists online players who have no file yet', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { list } = require('../lib/playerdata');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'webmc-pd-'));
+  const a = '00000000-0000-0000-0000-00000000000a';
+  fs.mkdirSync(path.join(dir, 'worlds', 'world', 'players', 'data'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'worlds', 'world', 'players', 'data', `${a}.dat`), zlib.gzipSync(file));
+  fs.writeFileSync(path.join(dir, 'usercache.json'), JSON.stringify([{ uuid: a, name: 'Old' }, { uuid: 'NEW-UUID', name: 'Fresh' }]));
+  const players = await list({ dir, readProps: () => ({}) }, ['Fresh']);
+  assert.deepStrictEqual(players.map((p) => [p.name, p.online, p.uuid]), [['Fresh', true, 'new-uuid'], ['Old', false, a]]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

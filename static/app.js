@@ -2035,7 +2035,7 @@ function PlayersTab(el, ctx) {
                     ? `<span class="faint small">${esc(p.dimension || '')}</span> <span class="addr mono small">${esc(p.pos.join(', '))}<button type="button" data-copy="${esc(coords)}" title="Copy for /tp">${icon('copy')}</button></span>${
                         p.online ? ' <span class="faint small" title="Player files are saved on autosave and when the player leaves">(last save)</span>' : ''
                       }`
-                    : '<span class="faint small">Unknown</span>'
+                    : `<span class="faint small">${p.online ? 'Not saved yet (shows after the next autosave)' : 'Unknown'}</span>`
                 }</td>
                 <td>${p.firstPlayed ? `<span title="${esc(fmtDate(p.firstPlayed))}">${esc(fmtAgo(p.firstPlayed))}</span>` : '<span class="faint small" title="Only Paper and Spigot servers record this">-</span>'}</td></tr>`;
             })
