@@ -444,7 +444,7 @@ table.table { width: 100%; border-collapse: collapse; }
 .progress-list .item { display: grid; gap: 4px; font-size: 12px; }
 
 /* players */
-.player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(250px, 100%), 1fr)); gap: 12px; }
+.player-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr)); gap: 12px; }
 .player { display: flex; align-items: center; gap: 12px; padding: 12px; }
 .avatar { width: 38px; height: 38px; border-radius: 8px; image-rendering: pixelated; background: var(--surface-3); flex: none; display: grid; place-items: center; font-weight: 700; color: var(--secondary-soft); overflow: hidden; }
 .avatar img { width: 100%; height: 100%; image-rendering: pixelated; }

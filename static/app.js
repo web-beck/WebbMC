@@ -7131,10 +7131,11 @@ function offerReload() {
 // onStats to fetch again then.
 const liveFns = new Map();
 let liveSeq = 0;
-let liveOpen = false;
+let statsAt = 0; // when the panel last pushed fresh figures
 function live(fn, ms, onStats = false) {
   const id = ++liveSeq;
-  liveFns.set(id, { fn, onStats, timer: setInterval(() => !(onStats && liveOpen) && fn(), ms) });
+  // Stats pages skip their timer while pushes arrive; it takes over when they stop (connection down, older panel).
+  liveFns.set(id, { fn, onStats, timer: setInterval(() => !(onStats && Date.now() - statsAt < ms) && fn(), ms) });
   return id;
 }
 function unlive(id) {
@@ -7174,6 +7175,7 @@ function listenForChanges() {
   let dropped = false;
   es.addEventListener('change', liveRefresh);
   es.addEventListener('stats', () => {
+    statsAt = Date.now();
     if (document.hidden) return;
     poll();
     for (const { fn, onStats } of [...liveFns.values()]) if (onStats) Promise.resolve().then(fn).catch(() => {});
@@ -7190,19 +7192,19 @@ function listenForChanges() {
   });
   es.onerror = () => {
     dropped = true; // the browser reconnects by itself; the timers carry on meanwhile
-    liveOpen = false;
   };
   es.onopen = () => {
-    liveOpen = true;
     if (dropped) liveRefresh(); // changes made while the connection was down
     dropped = false;
   };
 }
 
+let polledAt = 0;
 async function poll() {
   if (document.hidden && state.overview) return;
   try {
     state.overview = await api('GET', '/api/overview');
+    polledAt = Date.now();
     state.build ||= state.overview.panel.build;
     if (state.overview.panel.build && state.overview.panel.build !== state.build) offerReload();
     if (!state.connected) {
@@ -7234,6 +7236,8 @@ async function poll() {
   } else route();
   window.addEventListener('hashchange', route);
   document.addEventListener('visibilitychange', () => !document.hidden && liveRefresh());
-  setInterval(() => !liveOpen && poll(), 2500); // only while the live connection is down: it pushes otherwise
+  // The panel pushes fresh figures each second; fetch by ourselves only when none came for a while (the live
+  // connection is down, or the panel is an older build that does not push them).
+  setInterval(() => Date.now() - polledAt > 2500 && poll(), 1000);
   listenForChanges();
 })();
