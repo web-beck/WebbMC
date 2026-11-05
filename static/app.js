@@ -1940,7 +1940,11 @@ function MetricsTab(el, ctx) {
 
   async function load() {
     try {
-      history = (await api('GET', `/api/servers/${ctx.id}/metrics`)).history;
+      const since = history.at(-1)?.t || 0;
+      const fresh = (await api('GET', `/api/servers/${ctx.id}/metrics${since ? `?since=${since}` : ''}`)).history;
+      const all = [...history, ...fresh];
+      const newest = all.at(-1)?.t || 0; // the panel's clock, not this computer's: they may differ
+      history = all.filter((p) => p.t > newest - 600000); // ten minutes, as the panel keeps
       draw();
     } catch {
       /* next tick retries */
@@ -2157,7 +2161,15 @@ function PlayersTab(el, ctx) {
   }
   load();
   const timer = live(load, 5000);
-  return { update: render, destroy: () => unlive(timer) };
+  // A player file saved (autosave, a player leaving): new last-seen times and locations.
+  const watch = onFiles(ctx.id, (dir) => /(^|\/)(playerdata|players\/data)$/.test(dir) && loadHistory());
+  return {
+    update: render,
+    destroy: () => {
+      unlive(timer);
+      unlive(watch);
+    },
+  };
 }
 
 // ---------------------------------------------------------------- plugins / mods tab
@@ -2786,11 +2798,13 @@ function AddonsTab(el, ctx) {
     }
   };
   const timer = live(relook, 8000);
+  const watch = onFiles(ctx.id, (dir) => info && (dir === info.dir || dir === info.datapackDir) && relook());
   return {
     update: restartHint,
     destroy: () => {
       clearTimeout(searchTimer);
       unlive(timer);
+      unlive(watch);
     },
   };
 }
@@ -3187,7 +3201,14 @@ function FilesTab(el, ctx) {
     }
   };
   const timer = live(relook, 4000);
-  return { destroy: () => unlive(timer) };
+  const trimmed = (p) => String(p).replace(/^\/+|\/+$/g, '');
+  const watch = onFiles(ctx.id, (dir) => dir === trimmed(cwd) && relook());
+  return {
+    destroy: () => {
+      unlive(timer);
+      unlive(watch);
+    },
+  };
 }
 
 // ---------------------------------------------------------------- properties tab: server list look + server.properties
@@ -7119,6 +7140,16 @@ function live(fn, ms, onStats = false) {
 function unlive(id) {
   clearInterval(liveFns.get(id)?.timer);
   liveFns.delete(id);
+  fileFns.delete(id);
+}
+// A folder of a server changed ('files': the server wrote a log or a world, a plugin was dropped in, a file was
+// uploaded): pages showing that server's files pass fn(dir), dir relative to the server folder ('' for the folder
+// itself). Stopped with unlive().
+const fileFns = new Map();
+function onFiles(serverId, fn) {
+  const id = ++liveSeq;
+  fileFns.set(id, { serverId, fn });
+  return id;
 }
 let liveLast = 0;
 let liveTimer = null;
@@ -7146,6 +7177,16 @@ function listenForChanges() {
     if (document.hidden) return;
     poll();
     for (const { fn, onStats } of [...liveFns.values()]) if (onStats) Promise.resolve().then(fn).catch(() => {});
+  });
+  es.addEventListener('files', (e) => {
+    if (document.hidden) return; // coming back to the tab refreshes everything
+    let f;
+    try {
+      f = JSON.parse(e.data);
+    } catch {
+      return;
+    }
+    for (const { serverId, fn } of [...fileFns.values()]) if (serverId === f.server) Promise.resolve().then(() => fn(f.dir)).catch(() => {});
   });
   es.onerror = () => {
     dropped = true; // the browser reconnects by itself; the timers carry on meanwhile

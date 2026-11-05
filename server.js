@@ -133,18 +133,22 @@ const visibleIds = (user) => new Set(visibleServers(user).map((s) => s.id));
 route(
   'GET',
   '/api/events',
-  ({ req, res }) => {
+  ({ req, res, user }) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
     res.write(': connected\n\n');
     const onChange = () => res.write('event: change\ndata: {}\n\n');
     const onStats = () => res.write('event: stats\ndata: {}\n\n');
+    // Which folder of a server changed: only to accounts that can see that server.
+    const onFiles = (f) => visibleIds(user).has(f.server) && res.write(`event: files\ndata: ${JSON.stringify(f)}\n\n`);
     store.changes.on('change', onChange);
     store.changes.on('stats', onStats);
+    store.changes.on('files', onFiles);
     const keepAlive = setInterval(() => res.write(': ping\n\n'), 20000);
     req.on('close', () => {
       clearInterval(keepAlive);
       store.changes.off('change', onChange);
       store.changes.off('stats', onStats);
+      store.changes.off('files', onFiles);
     });
   },
   { stream: true },
@@ -230,7 +234,11 @@ route(
 );
 
 route('GET', '/api/servers/:id/java', ({ inst }) => java.plan(inst.cfg));
-route('GET', '/api/servers/:id/metrics', ({ inst }) => ({ history: inst.history, stats: inst.stats }));
+// ?since=<time of the newest point the page has>: only the points after it, as the page asks every second.
+route('GET', '/api/servers/:id/metrics', ({ inst, query }) => {
+  const since = Number(query.get('since')) || 0;
+  return { history: since ? inst.history.filter((p) => p.t > since) : inst.history, stats: inst.stats };
+});
 route('GET', '/api/servers/:id/size', async ({ inst }) => ({ bytes: await files.dirSize(inst.dir) }));
 
 route('GET', '/api/servers/:id/software', ({ inst }) => providers.status(inst.cfg));
