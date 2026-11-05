@@ -6283,6 +6283,7 @@ const PLAYIT_HOME = 'https://playit.gg/account/tunnels';
 function renderPlayit(card) {
   let last = '';
   let acting = false;
+  let cfConfigured = false; // CLOUDFLARE_API_TOKEN is set: WebbMC can add DNS records itself
   /** What the panel found about a playit installed on this computer (when it is not using it). */
   function externalNote(ext) {
     if (!ext || ext.inUse || ext.state === 'none') return '';
@@ -6343,6 +6344,7 @@ function renderPlayit(card) {
     }
     const dash = st.loginLink || PLAYIT_HOME;
     const cf = st.cloudflare || { configured: false, domains: [] };
+    cfConfigured = cf.configured;
     const domainCell = (t) => {
       const links = cf.domains.filter((d) => d.destination === t.destination);
       const rows = links.map(
@@ -6356,7 +6358,8 @@ function renderPlayit(card) {
         const show = `<button class="btn btn-sm btn-ghost" data-dns="records" data-dest="${esc(t.destination)}" data-host="${esc(links[0]?.host || '')}" title="The DNS records to add yourself, at any DNS provider">Show records</button>`;
         if (links.length) rows.push(show);
         else if (cf.configured) rows.push(`<div class="row" style="gap:6px"><button class="btn btn-sm" data-dns="add" data-dest="${esc(t.destination)}">${icon('link')}Use my domain</button>${show}</div>`);
-        else rows.push(`<div class="row" style="gap:6px">${show}<a class="small" href="#/settings/env" title="A Cloudflare API token with Zone > DNS > Edit">or add CLOUDFLARE_API_TOKEN to have WebbMC add them</a></div>`);
+        // No token: the same button shows the records to add by hand, at any DNS provider.
+        else rows.push(`<button class="btn btn-sm" data-dns="records" data-dest="${esc(t.destination)}" title="Shows the DNS records to add at your DNS provider">${icon('link')}Use my domain</button>`);
       }
       return rows.join('') || '<span class="faint small">-</span>';
     };
@@ -6444,7 +6447,8 @@ function renderPlayit(card) {
           )
           .join('')}
         <p class="hint">Java players join with <span class="mono">${esc(r.host)}</span>. If this is a Bedrock tunnel, players also type port <span class="mono">${r.port}</span> (Bedrock ignores SRV records).
-          If playit gives the tunnel a new address, these records need changing too.</p>`,
+          If playit gives the tunnel a new address, these records need changing too.</p>
+        ${cfConfigured ? '' : '<p class="hint">On Cloudflare? Add <a href="#/settings/env">CLOUDFLARE_API_TOKEN</a> and WebbMC can add these for you after you confirm.</p>'}`,
     });
   }
   card.addEventListener('click', async (e) => {
