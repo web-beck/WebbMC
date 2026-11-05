@@ -34,3 +34,22 @@ test('old number dimensions and a vanilla file without Bukkit data', () => {
 test('a broken file throws instead of looping', () => {
   assert.throws(() => readNbt(file.subarray(0, 20)));
 });
+
+test('finds players in the 26.1 players/data folder and the old playerdata folder', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const { list } = require('../lib/playerdata');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'webmc-pd-'));
+  const a = '13019a0c-7152-471b-80bc-666e2e5120f7';
+  const b = '00000000-0000-0000-0000-000000000002';
+  for (const [sub, uuid] of [[['players', 'data'], a], [['playerdata'], b]]) {
+    fs.mkdirSync(path.join(dir, 'world', ...sub), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'world', ...sub, `${uuid}.dat`), zlib.gzipSync(file));
+  }
+  fs.writeFileSync(path.join(dir, 'usercache.json'), JSON.stringify([{ uuid: a, name: 'MrMaximoo' }]));
+  const players = await list({ dir, readProps: () => ({}) }, ['mrmaximoo']);
+  assert.deepStrictEqual(players.map((p) => p.uuid).sort(), [b, a].sort());
+  assert.ok(players.find((p) => p.uuid === a).online);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
