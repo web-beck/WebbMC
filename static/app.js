@@ -6365,23 +6365,40 @@ function renderPlayit(card) {
       }
       return rows.join('') || '<span class="faint small">-</span>';
     };
+    const missing = st.missing || [];
+    // Servers with no tunnel: one click creates it (with the agent's key), or a pointer to where to do it.
+    const createBlock = missing.length
+      ? `<div class="stack-sm" style="margin-top:12px"><p class="sub"><strong>Servers without a tunnel</strong></p>${missing
+          .map(
+            (m) => `<div class="row"><a href="#/server/${esc(m.serverId)}">${esc(m.server)}</a><span class="faint small">${esc(m.what)} · port <span class="mono">${m.port}</span></span><span class="spacer"></span>${
+              st.canCreate ? `<button class="btn btn-sm btn-accent" data-tunnel="create" data-port="${m.port}" data-kind="${m.kind}">${icon('plus')}Create ${m.kind === 'java' ? 'Java' : 'Bedrock'} tunnel</button>` : ''
+            }</div>`,
+          )
+          .join('')}
+          ${st.canCreate ? '' : `<p class="hint">${existing ? 'To create tunnels from here, add this playit\'s secret key as <a href="#/settings/env">PLAYIT_SECRET_KEY</a>, or ' : ''}Add them on playit.gg.</p>`}</div>`
+      : '';
     const tunnels = st.tunnels.length
-      ? `<div class="table-wrap"><table class="table"><thead><tr><th>Address for players</th><th>Goes to</th><th>Server</th><th>Your domain</th></tr></thead><tbody>${st.tunnels
+      ? `<div class="table-wrap"><table class="table"><thead><tr><th>Address for players</th><th>Goes to</th><th>Server</th><th>Your domain</th>${st.canCreate ? '<th></th>' : ''}</tr></thead><tbody>${st.tunnels
           .map((t) => {
             const uses = (t.uses || []).map((u) => `<div><a href="#/server/${esc(u.serverId)}">${esc(u.server)}</a> <span class="faint small">${esc(u.what)}</span></div>`).join('');
             return `<tr><td>${t.address ? `<span class="addr">${esc(t.address)}<button type="button" data-copy="${esc(t.address)}" title="Copy">${icon('copy')}</button></span>` : '<span class="faint">Setting up...</span>'}${
               t.disabled ? ` <span class="tag warn" title="${esc(t.reason || '')}">Disabled</span>` : ''
-            }</td><td class="mono small">${esc(t.destination)}</td><td>${uses || '<span class="faint small">No server on that port</span>'}</td><td>${domainCell(t)}</td></tr>`;
+            }</td><td class="mono small">${esc(t.destination)}</td><td>${uses || '<span class="faint small">No server on that port</span>'}</td><td>${domainCell(t)}</td>${
+              st.canCreate ? `<td><button class="btn btn-sm btn-ghost" data-tunnel="delete" data-dest="${esc(t.destination)}" data-addr="${esc(t.address || '')}" title="Delete this tunnel on playit.gg">Delete</button></td>` : ''
+            }</tr>`;
           })
           .join('')}</tbody></table></div>
          <p class="hint">Servers show their tunnel address on the dashboard automatically (unless they have their own address in Settings). With <strong>Use my domain</strong>, pick your DNS provider and WebbMC shows the records to add there (on Cloudflare with a token, it adds them after you confirm and the dashboard shows your domain).</p>`
-      : `<p class="sub"><strong>No tunnels yet.</strong> Open playit.gg, add a tunnel of type <em>Minecraft Java</em> (or <em>Minecraft Bedrock</em>), and point it at <span class="mono">127.0.0.1</span> and your server's port${
+      : st.canCreate && missing.length
+        ? '<p class="sub"><strong>No tunnels yet.</strong> Create one for a server below, and its address shows up here within a few seconds.</p>'
+        : `<p class="sub"><strong>No tunnels yet.</strong> Open playit.gg, add a tunnel of type <em>Minecraft Java</em> (or <em>Minecraft Bedrock</em>), and point it at <span class="mono">127.0.0.1</span> and your server's port${
           state.overview.servers.length ? `: ${state.overview.servers.map((s) => `${esc(s.name)} uses <span class="mono">${s.port}</span>`).join(', ')}` : ''
         }. It shows up here within a few seconds.</p>`;
     return `${head(pill('ok', 'Running'))}${err}
       ${st.notices.map((n) => notice(`${esc(n.message)}${n.link ? ` <a href="${esc(n.link)}" target="_blank" rel="noopener">Fix it</a>` : ''}`, 'warn')).join('')}
       ${st.pendingTunnels.length ? notice(st.pendingTunnels.map(esc).join('<br>')) : ''}
       ${tunnels}
+      ${createBlock}
       <div class="row" style="margin-top:12px"><a class="btn btn-sm btn-accent" href="${esc(dash)}" target="_blank" rel="noopener">${icon('external')}Manage tunnels on playit.gg</a>
         ${existing ? '' : `<button class="btn btn-sm" data-playit="update">Update agent</button><button class="btn btn-sm btn-ghost" data-playit="unlink">Unlink account</button>${off}`}</div>
       ${st.accountStatus === 'guest' ? '<p class="hint">This is a guest playit.gg account. Open the dashboard and add an email so you do not lose it.</p>' : ''}
@@ -6477,6 +6494,27 @@ function renderPlayit(card) {
         ${r.provider === 'Cloudflare' && !cfConfigured ? '<p class="hint">Add <a href="#/settings/env">CLOUDFLARE_API_TOKEN</a> and WebbMC can add these for you after you confirm.</p>' : ''}`,
     });
   }
+  card.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-tunnel]');
+    if (!b) return;
+    const del = b.dataset.tunnel === 'delete';
+    if (del && !(await confirmBox('Delete this tunnel?', `The tunnel ${b.dataset.addr || b.dataset.dest} is deleted on playit.gg and its address stops working. A new tunnel gets a different address.`, { confirmText: 'Delete', danger: true }))) return;
+    acting = true;
+    b.disabled = true;
+    try {
+      const st = del
+        ? await api('DELETE', `/api/playit/tunnels?destination=${enc(b.dataset.dest)}&address=${enc(b.dataset.addr)}`)
+        : await api('POST', '/api/playit/tunnels', { port: Number(b.dataset.port), kind: b.dataset.kind });
+      toast(del ? 'Tunnel deleted' : 'Tunnel created. Its address shows up in a few seconds.', 'ok');
+      last = view(st);
+      card.innerHTML = last;
+    } catch (err) {
+      toast(err.message, 'bad');
+      b.disabled = false;
+    } finally {
+      acting = false;
+    }
+  });
   card.addEventListener('click', async (e) => {
     const b = e.target.closest('[data-dns]');
     if (!b) return;

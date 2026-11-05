@@ -547,8 +547,41 @@ const withTunnelUses = (st) => {
     t.uses = uses.filter((u) => u.port === port).map((u) => ({ serverId: u.serverId, server: u.server, what: u.what }));
   }
   st.cloudflare = cloudflare.status();
+  // Servers with no tunnel yet: the game port (Java) and Geyser's port (Bedrock), for "Create tunnel".
+  // shortcut: matched by port number only (the agent does not say TCP or UDP), so a Geyser on the game port counts as covered.
+  const taken = new Set((st.tunnels || []).map((t) => Number(/:(\d+)\s*$/.exec(t.destination || '')?.[1])));
+  st.canCreate = st.state === 'running' && playit.canManage();
+  st.missing =
+    st.state === 'running'
+      ? uses
+          .filter((u) => (u.key === 'game' || u.probe === 'bedrock') && !taken.has(u.port))
+          .filter((u, i, all) => all.findIndex((o) => o.port === u.port) === i)
+          .map((u) => ({ serverId: u.serverId, server: u.server, what: u.what, port: u.port, kind: u.key === 'game' ? 'java' : 'bedrock' }))
+      : [];
   return st;
 };
+route(
+  'POST',
+  '/api/playit/tunnels',
+  async ({ body }) => {
+    const port = Number(body.port);
+    const use = manager.all().flatMap((inst) => ports.forServer(inst)).find((u) => u.port === port);
+    await playit.createTunnel(port, String(body.kind || ''), use?.server);
+    await new Promise((r) => setTimeout(r, 1500)); // the agent hears about the new tunnel within a moment
+    return withTunnelUses(await playit.status());
+  },
+  { admin: true },
+);
+route(
+  'DELETE',
+  '/api/playit/tunnels',
+  async ({ query }) => {
+    await playit.deleteTunnel(query.get('destination'), query.get('address'));
+    await new Promise((r) => setTimeout(r, 1500));
+    return withTunnelUses(await playit.status());
+  },
+  { admin: true },
+);
 route('GET', '/api/playit', async () => withTunnelUses(await playit.status()), { admin: true });
 route('POST', '/api/playit', async ({ body }) => withTunnelUses(await playit.act(String(body.action || ''))), { admin: true });
 // Your own domain for a tunnel, with Cloudflare DNS: preview the record changes, then apply them once confirmed.
