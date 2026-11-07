@@ -645,6 +645,7 @@ route('DELETE', '/api/playit/dns', ({ query, user }) => cloudflare.remove(query.
 
 // Everyone's accounts: the admin approves, blocks, removes, makes admins and gives out one-time passwords
 route('GET', '/api/users', () => auth.listUsers(), { admin: true });
+route('GET', '/api/users/search', ({ user, query }) => auth.searchUsers(user, query.get('q')));
 route(
   'POST',
   '/api/users',

@@ -4533,7 +4533,7 @@ function ServerSettingsTab(el, ctx) {
           : `<form class="card panel-card form" id="ss-share" novalidate>
                <div><h2>Sharing</h2><p class="sub" style="margin:4px 0 0">Give other accounts access to this server. They can start and stop it and use every tab (console, files, plugins, backups, settings), but cannot delete it or change who it is shared with.</p></div>
                <div class="share-list" id="ss-share-list"></div>
-               <div class="input-group"><input class="input" name="who" placeholder="Username${me().admin ? ' or email' : ''}" autocomplete="off" spellcheck="false"${me().admin ? ' list="user-list"' : ''}><button class="btn" type="submit">${icon('plus')}Share</button></div>
+               <div class="input-group"><input class="input" name="who" placeholder="Username${me().admin ? ' or email' : ''}" autocomplete="off" spellcheck="false" list="share-users"><datalist id="share-users"></datalist><button class="btn" type="submit">${icon('plus')}Share</button></div>
              </form>`
       }
 
@@ -4724,7 +4724,18 @@ function ServerSettingsTab(el, ctx) {
       }
     };
     renderShared();
-    if (me().admin) fillUserList();
+    // Suggest accounts as you type: two letters or more, people it is not shared with yet.
+    let lookup = 0;
+    share.elements.who.oninput = async (e) => {
+      const q = e.target.value.trim();
+      const n = ++lookup;
+      const found = q.length < 2 ? [] : await api('GET', `/api/users/search?q=${encodeURIComponent(q)}`).catch(() => []);
+      if (n !== lookup) return; // a newer keystroke already answered
+      $('#share-users', el).innerHTML = found
+        .filter((u) => !shared.includes(u.id) && u.id !== s.owner)
+        .map((u) => `<option value="${esc(u.id)}">${esc(u.name !== u.id ? u.name : '')}</option>`)
+        .join('');
+    };
     share.onsubmit = async (e) => {
       e.preventDefault();
       const who = share.elements.who.value.trim().toLowerCase();
@@ -6246,6 +6257,8 @@ function Account(root, args = []) {
           ${a.admin ? `<span class="tag">${icon('shield')}Admin</span>` : ''}
           <span class="tag">${a.servers} server${a.servers === 1 ? '' : 's'}</span>
           ${a.firstSeen ? `<span class="faint small">Joined ${esc(fmtDate(a.firstSeen))}</span>` : ''}
+          <label class="btn btn-sm btn-ghost" tabindex="0">${icon('image')}Change picture<input type="file" accept="image/*" hidden id="acc-pic"></label>
+          ${a.picture ? `<button type="button" class="btn btn-sm btn-ghost" id="acc-pic-remove">${icon('trash')}Remove picture</button>` : ''}
         </div>
       </div>
 
@@ -6312,6 +6325,41 @@ function Account(root, args = []) {
         <div class="row"><button class="btn" id="acc-everywhere">${icon('logout')}Sign out other browsers</button><button class="btn btn-ghost" data-logout>Sign out here</button></div>
       </div>`;
 
+    const savePicture = async (picture, msg) => {
+      try {
+        const next = await api('PATCH', '/api/account', { picture });
+        toast(msg, 'ok');
+        await poll();
+        render(next);
+      } catch (err) {
+        toast(err.message, 'bad');
+      }
+    };
+    $('#acc-pic', box).onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (!file.type.startsWith('image/')) return toast('That file is not a picture', 'bad');
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        // Crop to a centred square, 128px, so the stored picture stays small.
+        const c = document.createElement('canvas');
+        c.width = c.height = 128;
+        const g = c.getContext('2d');
+        g.imageSmoothingQuality = 'high';
+        const side = Math.min(img.naturalWidth, img.naturalHeight);
+        g.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, 128, 128);
+        savePicture(c.toDataURL('image/webp', 0.85), 'Picture updated');
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        toast('Could not read that picture. Try a PNG, JPG, GIF or WebP.', 'bad');
+      };
+      img.src = url;
+    };
+    $('#acc-pic', box).parentNode.onkeydown = (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), $('#acc-pic', box).click());
+    if ($('#acc-pic-remove', box)) $('#acc-pic-remove', box).onclick = () => savePicture('', 'Picture removed');
     $('#acc-profile', box).onsubmit = async (e) => {
       e.preventDefault();
       const f = e.target.elements;
